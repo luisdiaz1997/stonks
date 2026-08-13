@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stonks"
+version = "0.1.0"
+description = "Simple, exploratory algorithms for stocks and investments — a learning playground for market-related ideas."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Luis Chumpitaz Diaz", email = "luisdiaz1997@example.com" },
+]
+keywords = [
+    "stocks",
+    "investing",
+    "finance",
+    "backtesting",
+    "trading",
+    "algorithms",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "mypy>=1.0.0",
+]
+notebooks = [
+    "jupyter>=1.0.0",
+    "matplotlib>=3.6.0",
+    "seaborn>=0.12.0",
+]
+all = [
+    "stonks[dev,notebooks]",
+]
+
+[project.urls]
+Homepage = "https://github.com/luisdiaz1997/stonks"
+Repository = "https://github.com/luisdiaz1997/stonks"
+Issues = "https://github.com/luisdiaz1997/stonks/issues"
+
+[tool.setuptools.packages.find]
+# Package is at root level: stonks/
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312", "py313", "py314"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
