@@ -1,17 +1,30 @@
 """
 stonks: Simple, exploratory algorithms for stocks and investments.
 
-A learning playground for experimenting with market-related ideas — signals,
-backtests, portfolio heuristics, and anything else worth trying out.
+This package currently provides a thin data wrapper,
+:func:`get_prices`, that returns a clean **N×T** matrix (N tickers × T time
+points) of stock prices for the most-liquid US common stocks (or any ticker
+list you pass in). Later layers (differencing, covariance, portfolios) will
+build on top of this matrix.
 
 No financial advice; just code to read, run, and tinker with.
 
 Example:
-    >>> import stonks
-    >>> stonks.__version__
-    '0.1.0'
+    >>> from stonks import get_prices
+    >>> prices = get_prices(tickers=["AAPL", "MSFT"], period="1y", interval="1d")
+    >>> prices.shape  # (2 tickers, ~252 trading days)
 """
+
+from .config import Settings
+from .download import get_prices
+from .universe import list_all_common_stocks, load_universe
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+__all__ = [
+    "get_prices",
+    "load_universe",
+    "list_all_common_stocks",
+    "Settings",
+    "__version__",
+]

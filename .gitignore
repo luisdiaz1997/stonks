@@ -64,12 +64,15 @@ venv.bak/
 Thumbs.db
 
 # Project-specific: market data and outputs (keep out of VCS)
-data/raw/
-data/processed/
+# Runtime cache is fully regenerable from the wrapper; data/ is auto-created.
+data/
 outputs/
 *.csv
 *.parquet
 *.feather
+
+# ZCode agent metadata
+.zcode/
 
 # Secrets (API keys, broker credentials)
 *.key
