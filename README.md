@@ -41,11 +41,13 @@ prices = get_prices(tickers=["AAPL", "MSFT", "GOOG"], period="1y")
 weekly = get_prices(tickers=["AAPL"], period="2y", interval="1wk", field="volume")
 ```
 
-Or from the command line:
+Or from the command line (a `stonks` console command is installed, plus
+`python -m stonks`):
 
 ```bash
-python -m stonks fetch --tickers AAPL,MSFT,GOOG --period 1y --interval 1d
-python -m stonks fetch --top-n 40 --period 1y --field close
+stonks fetch --tickers AAPL,MSFT,GOOG --period 1y --interval 1d
+stonks fetch --top-n 40 --period 1y --field close
+stonks fetch --help
 ```
 
 Everything is cached under `data/` (gitignored), so repeat calls are instant.

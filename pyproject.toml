@@ -40,6 +40,7 @@ dependencies = [
     "yfinance>=0.2.0",
     "pyarrow>=12.0.0",
     "tqdm>=4.62.0",
+    "click>=8.0.0",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,9 @@ all = [
 Homepage = "https://github.com/luisdiaz1997/stonks"
 Repository = "https://github.com/luisdiaz1997/stonks"
 Issues = "https://github.com/luisdiaz1997/stonks/issues"
+
+[project.scripts]
+stonks = "stonks.cli:cli"
 
 [tool.setuptools.packages.find]
 # Package is at root level: stonks/

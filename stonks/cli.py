@@ -1,62 +1,86 @@
-"""Command-line interface: ``python -m stonks fetch ...`` -> an N×T price matrix."""
+"""Command-line interface for stonks, built on Click.
+
+Examples:
+    stonks fetch --tickers AAPL,MSFT,GOOG --period 1y
+    stonks fetch --top-n 40 --period 1y --field close
+    python -m stonks fetch --tickers AAPL --interval 1wk
+"""
 
 from __future__ import annotations
 
-import argparse
+import click
 
 from . import __version__
 from .download import get_prices
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="stonks", description="Stock data wrapper.")
-    parser.add_argument("--version", action="version", version=f"stonks {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+@click.group()
+@click.version_option(version=__version__)
+def cli() -> None:
+    """stonks: simple, exploratory algorithms for stocks and investments."""
 
-    f = sub.add_parser("fetch", help="Fetch an N×T price matrix and print a preview.")
-    f.add_argument("--top-n", type=int, default=1500, help="Most-liquid N stocks (default 1500).")
-    f.add_argument(
-        "--tickers",
-        type=str,
-        default=None,
-        help="Comma-separated tickers (e.g. AAPL,MSFT). Skips ranking.",
+
+@cli.command()
+@click.option(
+    "--top-n",
+    type=int,
+    default=1500,
+    show_default=True,
+    help="Most-liquid N common stocks to keep (ignored if --tickers is given).",
+)
+@click.option(
+    "--tickers",
+    type=str,
+    default=None,
+    help="Comma-separated tickers, e.g. AAPL,MSFT. Skips ranking (fast).",
+)
+@click.option("--period", type=str, default="1y", show_default=True, help="History window (1y, 5y, max, ...).")
+@click.option(
+    "--interval",
+    type=str,
+    default="1d",
+    show_default=True,
+    help="Bar resolution: 1d, 1wk, 1mo, or intraday 1m..90m (last 60d).",
+)
+@click.option(
+    "--field",
+    type=click.Choice(["open", "high", "low", "close", "volume"], case_sensitive=False),
+    default="close",
+    show_default=True,
+    help="OHLCV field to return.",
+)
+@click.option("--force-refresh", is_flag=True, default=False, help="Bypass cache and re-download.")
+def fetch(
+    top_n: int,
+    tickers: str | None,
+    period: str,
+    interval: str,
+    field: str,
+    force_refresh: bool,
+) -> None:
+    """Fetch an N×T price matrix and print a preview."""
+    ticker_list = (
+        [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        if tickers
+        else None
     )
-    f.add_argument("--period", default="1y", help="History window (e.g. 1y, 5y, max).")
-    f.add_argument(
-        "--interval", default="1d", help="Bar resolution (1d, 1wk, 1mo, or 1m..90m intraday)."
+
+    matrix = get_prices(
+        top_n=top_n,
+        tickers=ticker_list,
+        period=period,
+        interval=interval,
+        field=field,
+        force_refresh=force_refresh,
     )
-    f.add_argument("--field", default="close", help="open/high/low/close/volume (default close).")
-    f.add_argument("--force-refresh", action="store_true", help="Bypass cache.")
-    return parser
 
-
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-
-    if args.command == "fetch":
-        tickers = (
-            [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
-            if args.tickers
-            else None
-        )
-        mat = get_prices(
-            top_n=args.top_n,
-            tickers=tickers,
-            period=args.period,
-            interval=args.interval,
-            field=args.field,
-            force_refresh=args.force_refresh,
-        )
-        print(
-            f"\nmatrix: {mat.shape[0]} tickers × {mat.shape[1]} bars "
-            f"(field={args.field}, interval={args.interval}, period={args.period})"
-        )
-        # Top-left 5×5 preview.
-        print(mat.iloc[: min(5, len(mat)), : min(5, mat.shape[1])])
-        return 0
-
-    return 1
+    click.echo(
+        f"\nmatrix: {matrix.shape[0]} tickers × {matrix.shape[1]} bars "
+        f"(field={field}, interval={interval}, period={period})"
+    )
+    # Top-left 5×5 preview.
+    click.echo(matrix.iloc[: min(5, len(matrix)), : min(5, matrix.shape[1])].to_string())
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    cli()
