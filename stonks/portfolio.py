@@ -55,25 +55,46 @@ def _optimize_long_only(
     iters: int = 8000,
     lr: float = 0.5,
     seed: int = 0,
-) -> np.ndarray:
-    """Maximize ``mu'w - (gamma/2) w'Sigma w`` with ``w = softmax(z)``.
+    n_restarts: int = 1,
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Multi-restart long-only softmax optimization (gradient ascent).
 
-    The softmax keeps ``w >= 0`` and ``sum(w) = 1`` (long-only, fully invested)
-    by construction, so the outer problem is unconstrained ascent on ``z``.
+    Maximizes ``mu'w - (gamma/2) w'Sigma w`` with ``w = softmax(z)`` (so
+    ``w >= 0`` and ``sum(w) = 1`` by construction). The problem is non-convex
+    in ``z`` — many local optima — so we run ``n_restarts`` optimizations from
+    different random inits (deterministic: restart ``r`` uses seed ``seed+r``)
+    and keep the restart with the **highest final objective**.
+
+    Returns ``(best_weights, histories)`` where ``histories[r]`` is the
+    objective value at each iteration of restart ``r``.
     """
-    torch.manual_seed(seed)
     N = len(mu)
     mu_t = torch.tensor(mu, dtype=torch.float64)
     Sig_t = torch.tensor(Sigma, dtype=torch.float64)
-    z = torch.randn(N, dtype=torch.float64, requires_grad=True)
-    opt = torch.optim.Adam([z], lr=lr)
-    for _ in range(iters):
-        opt.zero_grad()
-        w = torch.softmax(z, dim=0)
-        loss = -(mu_t @ w - 0.5 * gamma * w @ Sig_t @ w)
-        loss.backward()
-        opt.step()
-    return torch.softmax(z, dim=0).detach().numpy()
+    histories: list[np.ndarray] = []
+    best_w: np.ndarray | None = None
+    best_obj = -np.inf
+    for r in range(n_restarts):
+        torch.manual_seed(seed + r)
+        z = torch.randn(N, dtype=torch.float64, requires_grad=True)
+        opt = torch.optim.Adam([z], lr=lr)
+        hist = np.empty(iters)
+        for it in range(iters):
+            opt.zero_grad()
+            w = torch.softmax(z, dim=0)
+            obj = mu_t @ w - 0.5 * gamma * w @ Sig_t @ w
+            (-obj).backward()
+            opt.step()
+            with torch.no_grad():                    # objective AFTER the step,
+                wp = torch.softmax(z, dim=0)          # so hist[-1] == final objective
+                hist[it] = (mu_t @ wp - 0.5 * gamma * wp @ Sig_t @ wp).item()
+        final_obj = hist[-1]
+        w = torch.softmax(z, dim=0).detach()
+        histories.append(hist)
+        if final_obj > best_obj:
+            best_obj, best_w = final_obj, w.numpy()
+    assert best_w is not None
+    return best_w, histories
 
 
 def optimize_portfolio(
@@ -86,7 +107,10 @@ def optimize_portfolio(
     field: str = "close",
     min_weight: float = 1e-3,
     force_refresh: bool = False,
-) -> pd.DataFrame:
+    n_restarts: int = 10,
+    seed: int = 0,
+    return_history: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, list[np.ndarray]]:
     """Build a long-only mean-variance portfolio using a factor-model covariance.
 
     Args:
@@ -99,10 +123,17 @@ def optimize_portfolio(
         field: OHLCV field used to compute returns.
         min_weight: drop weights below this, then renormalize to sum to 1.
         force_refresh: bypass the price cache.
+        n_restarts: number of random restarts. The softmax problem is non-convex
+            in ``z`` (many local optima), so the restart with the highest final
+            objective is kept.
+        seed: base random seed; restart ``r`` uses ``seed + r`` (deterministic).
+        return_history: if True, also return the per-restart training curves.
 
     Returns:
         DataFrame indexed by ticker with a ``weight`` column, sorted descending;
-        weights are non-negative and sum to 1.
+        weights are non-negative and sum to 1. If ``return_history``, returns
+        ``(weights, histories)`` where ``histories[r]`` is the objective value
+        per iteration of restart ``r``.
     """
     prices = get_prices(
         top_n=top_n, period=period, interval=interval,
@@ -113,9 +144,12 @@ def optimize_portfolio(
     returns = to_returns(prices_win).dropna()
 
     mu, Sigma = _factor_covariance(returns, K)
-    w = _optimize_long_only(mu, Sigma, gamma)
+    w, histories = _optimize_long_only(mu, Sigma, gamma, n_restarts=n_restarts, seed=seed)
 
     weights = pd.Series(w, index=returns.index)
     weights = weights[weights >= min_weight]
     weights = (weights / weights.sum()).rename("weight")
-    return weights.sort_values(ascending=False).to_frame()
+    weights = weights.sort_values(ascending=False).to_frame()
+    if return_history:
+        return weights, histories
+    return weights

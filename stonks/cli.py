@@ -93,6 +93,10 @@ def fetch(
 )
 @click.option("--period", default="2y", show_default=True, help="Cache source to slice --months from.")
 @click.option("--min-weight", type=float, default=1e-3, show_default=True)
+@click.option(
+    "--n-restarts", type=int, default=10, show_default=True,
+    help="Random restarts; the best final objective is kept (non-convex problem).",
+)
 @click.option("--force-refresh", is_flag=True, default=False, help="Bypass cache.")
 def portfolio(
     top_n: int,
@@ -102,6 +106,7 @@ def portfolio(
     k_factors: int,
     period: str,
     min_weight: float,
+    n_restarts: int,
     force_refresh: bool,
 ) -> None:
     """Recommend a long-only portfolio (factor-model mean-variance)."""
@@ -111,6 +116,7 @@ def portfolio(
     w = optimize_portfolio(
         top_n=top_n, months=months, interval=interval, gamma=gamma,
         K=k_factors, period=period, min_weight=min_weight, force_refresh=force_refresh,
+        n_restarts=n_restarts,
     )
 
     # enrich with company names when available
