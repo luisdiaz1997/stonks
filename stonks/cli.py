@@ -97,6 +97,8 @@ def fetch(
     "--n-restarts", type=int, default=10, show_default=True,
     help="Random restarts; the best final objective is kept (non-convex problem).",
 )
+@click.option("--lr", type=float, default=0.05, show_default=True,
+              help="Optimizer learning rate (smaller = smoother ascent).")
 @click.option("--force-refresh", is_flag=True, default=False, help="Bypass cache.")
 def portfolio(
     top_n: int,
@@ -107,6 +109,7 @@ def portfolio(
     period: str,
     min_weight: float,
     n_restarts: int,
+    lr: float,
     force_refresh: bool,
 ) -> None:
     """Recommend a long-only portfolio (factor-model mean-variance)."""
@@ -116,7 +119,7 @@ def portfolio(
     w = optimize_portfolio(
         top_n=top_n, months=months, interval=interval, gamma=gamma,
         K=k_factors, period=period, min_weight=min_weight, force_refresh=force_refresh,
-        n_restarts=n_restarts,
+        n_restarts=n_restarts, lr=lr,
     )
 
     # enrich with company names when available

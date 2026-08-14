@@ -53,7 +53,7 @@ def _optimize_long_only(
     Sigma: np.ndarray,
     gamma: float,
     iters: int = 8000,
-    lr: float = 0.5,
+    lr: float = 0.05,   # smaller = smoother ascent (0.5 made some restarts diverge/drop)
     seed: int = 0,
     n_restarts: int = 1,
 ) -> tuple[np.ndarray, list[np.ndarray]]:
@@ -108,6 +108,7 @@ def optimize_portfolio(
     min_weight: float = 1e-3,
     force_refresh: bool = False,
     n_restarts: int = 10,
+    lr: float = 0.05,
     seed: int = 0,
     return_history: bool = False,
 ) -> pd.DataFrame | tuple[pd.DataFrame, list[np.ndarray]]:
@@ -123,6 +124,8 @@ def optimize_portfolio(
         field: OHLCV field used to compute returns.
         min_weight: drop weights below this, then renormalize to sum to 1.
         force_refresh: bypass the price cache.
+        lr: optimizer learning rate; smaller values give a smoother, monotonically
+            increasing ascent (large values can overshoot and drop).
         n_restarts: number of random restarts. The softmax problem is non-convex
             in ``z`` (many local optima), so the restart with the highest final
             objective is kept.
@@ -144,7 +147,7 @@ def optimize_portfolio(
     returns = to_returns(prices_win).dropna()
 
     mu, Sigma = _factor_covariance(returns, K)
-    w, histories = _optimize_long_only(mu, Sigma, gamma, n_restarts=n_restarts, seed=seed)
+    w, histories = _optimize_long_only(mu, Sigma, gamma, n_restarts=n_restarts, lr=lr, seed=seed)
 
     weights = pd.Series(w, index=returns.index)
     weights = weights[weights >= min_weight]
