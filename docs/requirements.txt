@@ -1,2 +1,10 @@
 sphinx>=7.0
-myst-parser>=2.0
+sphinx-rtd-theme>=3.0
+sphinx-autodoc-typehints>=2.0
+numpy
+torch
+pandas
+yfinance
+pyarrow
+tqdm
+click

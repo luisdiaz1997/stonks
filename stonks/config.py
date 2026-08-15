@@ -26,7 +26,7 @@ class Settings:
         period: yfinance history window, e.g. ``"1y"``, ``"5y"``, ``"max"``.
         interval: Bar resolution. Daily/weekly/monthly (``"1d"``/``"1wk"``/
             ``"1mo"``) work over long ``period`` values; intraday
-            (``"1m"``,``"2m"``,``"5m"``,``"15m"``,``"30m"``,``"60m"``,``"90m"``)
+            (``"1m"``, ``"2m"``, ``"5m"``, ``"15m"``, ``"30m"``, ``"60m"``, ``"90m"``)
             is limited to the last 60 days by yfinance.
         top_n: How many of the most-liquid common stocks to keep when no
             explicit ticker list is given.
