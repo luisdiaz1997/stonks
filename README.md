@@ -50,6 +50,28 @@ stonks fetch --top-n 40 --period 1y --field close
 stonks fetch --help
 ```
 
+Generate a portfolio recommendation without placing any orders:
+
+```bash
+stonks portfolio --top-n 500 --months 3 --gamma 50 -k 25
+```
+
+To opt into Robinhood execution, add `--execute`. The CLI authenticates, shows
+the exact dollar orders, and asks for confirmation; answering no submits
+nothing. Orders are buy-only fractional market orders and do not sell or
+rebalance existing holdings. Use `--amount` to invest less than the full buying
+power reported by Robinhood.
+
+```bash
+stonks portfolio --top-n 500 --months 3 --gamma 50 -k 25 --execute --amount 500
+```
+
+`robin_stocks` securely prompts for credentials when it has no cached session.
+Alternatively, set `ROBINHOOD_USERNAME`, `ROBINHOOD_PASSWORD`, and optionally
+`ROBINHOOD_MFA_CODE` in the environment. Never pass a password as a command-line
+argument or commit credentials to this repository. `robin_stocks` relies on an
+unofficial Robinhood API, so execution can break when Robinhood changes it.
+
 Everything is cached under `data/` (gitignored), so repeat calls are instant.
 
 ### Where the data comes from

@@ -100,6 +100,18 @@ def fetch(
 @click.option("--lr", type=float, default=0.05, show_default=True,
               help="Optimizer learning rate (smaller = smoother ascent).")
 @click.option("--force-refresh", is_flag=True, default=False, help="Bypass cache.")
+@click.option(
+    "--execute",
+    is_flag=True,
+    default=False,
+    help="After confirmation, buy the recommendation in Robinhood.",
+)
+@click.option(
+    "--amount",
+    type=click.FloatRange(min=1.0),
+    default=None,
+    help="Dollars to invest with --execute (default: all available buying power).",
+)
 def portfolio(
     top_n: int,
     months: int,
@@ -111,10 +123,15 @@ def portfolio(
     n_restarts: int,
     lr: float,
     force_refresh: bool,
+    execute: bool,
+    amount: float | None,
 ) -> None:
-    """Recommend a long-only portfolio (factor-model mean-variance)."""
+    """Recommend a long-only portfolio, optionally buying it in Robinhood."""
     from .portfolio import optimize_portfolio
     from .universe import load_universe
+
+    if amount is not None and not execute:
+        raise click.UsageError("--amount requires --execute")
 
     w = optimize_portfolio(
         top_n=top_n, months=months, interval=interval, gamma=gamma,
@@ -135,6 +152,62 @@ def portfolio(
     )
     click.echo(w.to_string())
     click.echo(f"\nsum(weight) = {w['weight'].sum():.4f}")
+
+    if not execute:
+        return
+
+    from .robinhood import (
+        account_buying_power,
+        allocate_fractional_buys,
+        login,
+        submit_fractional_buys,
+    )
+
+    click.echo("\nAuthenticating with Robinhood (no orders are submitted yet)...")
+    try:
+        rh = login()
+        buying_power, account_number = account_buying_power(rh)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    budget = buying_power if amount is None else amount
+    if budget > buying_power + 1e-9:
+        raise click.ClickException(
+            f"requested ${budget:,.2f}, but Robinhood reports only "
+            f"${buying_power:,.2f} of buying power"
+        )
+    try:
+        plan = allocate_fractional_buys(w["weight"], budget)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(
+        f"\nProposed Robinhood orders: {len(plan)} buy-only fractional market orders "
+        f"totaling ${plan['dollars'].sum():,.2f}"
+    )
+    click.echo(plan.to_string(formatters={"dollars": "${:,.2f}".format}))
+    click.echo(
+        "\nExisting holdings will not be sold. Orders are GFD regular-hours orders "
+        "and may queue while the market is closed."
+    )
+
+    if not click.confirm("Do you want to submit this portfolio to Robinhood?", default=False):
+        click.echo("Canceled; no orders were submitted.")
+        return
+
+    try:
+        results = submit_fractional_buys(rh, plan, account_number=account_number)
+    except Exception as exc:
+        raise click.ClickException(f"Robinhood order submission failed: {exc}") from exc
+
+    click.echo("\nRobinhood order responses:")
+    click.echo(results.to_string())
+    failures = results[results["error"] != ""]
+    if not failures.empty:
+        raise click.ClickException(
+            f"{len(failures)} of {len(results)} orders returned an error; "
+            "review Robinhood activity before retrying"
+        )
 
 
 if __name__ == "__main__":

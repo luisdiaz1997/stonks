@@ -41,6 +41,7 @@ dependencies = [
     "pyarrow>=12.0.0",
     "tqdm>=4.62.0",
     "click>=8.0.0",
+    "robin_stocks>=3.4.0",
 ]
 
 [project.optional-dependencies]
