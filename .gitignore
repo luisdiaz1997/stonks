@@ -77,3 +77,4 @@ outputs/
 # Secrets (API keys, broker credentials)
 *.key
 secrets.json
+docs/_build/
