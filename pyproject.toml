@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stonks"
+name = "stonker"
 version = "0.1.0"
 description = "Simple, exploratory algorithms for stocks and investments — a learning playground for market-related ideas."
 readme = "README.md"
@@ -58,7 +58,7 @@ notebooks = [
     "seaborn>=0.12.0",
 ]
 all = [
-    "stonks[dev,notebooks]",
+    "stonker[dev,notebooks]",
 ]
 
 [project.urls]
@@ -70,7 +70,7 @@ Issues = "https://github.com/luisdiaz1997/stonks/issues"
 stonks = "stonks.cli:cli"
 
 [tool.setuptools.packages.find]
-# Package is at root level: stonks/
+include = ["stonks*"]   # ship only the package, not tests/
 
 [tool.black]
 line-length = 100

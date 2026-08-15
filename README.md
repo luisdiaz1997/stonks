@@ -8,6 +8,12 @@ advice**; just code to read, run, and tinker with.
 
 ## Installation
 
+From PyPI (distribution name `stonker`, import name `stonks`):
+
+```bash
+pip install stonker
+```
+
 From source (editable, recommended while developing):
 
 ```bash
@@ -16,11 +22,8 @@ cd stonks
 pip install -e ".[dev]"
 ```
 
-Minimal install (runtime deps only):
-
-```bash
-pip install -e .
-```
+Extras: `pip install "stonker[notebooks]"` (jupyter/matplotlib/seaborn) or
+`"stonker[all]"`.
 
 ## Usage
 
