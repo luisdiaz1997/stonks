@@ -1,6 +1,12 @@
 # stonks
 
+[![PyPI](https://img.shields.io/pypi/v/stonker.svg)](https://pypi.org/project/stonker/)
+[![Python](https://img.shields.io/pypi/pyversions/stonker.svg)](https://pypi.org/project/stonker/)
+
 Simple, exploratory algorithms for stocks and investments.
+
+> Install from PyPI: `pip install stonker` — the distribution is named **stonker**,
+> the import name is `stonks`. PyPI page: <https://pypi.org/project/stonker/>
 
 A learning playground for experimenting with market-related ideas — backtests,
 signals, portfolio heuristics, and anything else worth trying out. **No financial

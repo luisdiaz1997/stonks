@@ -2,6 +2,7 @@
 
 Exploratory stock/investment algorithms. Python package + notebooks + CLI.
 **Not financial advice.** Repo: github.com/luisdiaz1997/stonks.
+- **Published on PyPI as `stonker`** (import name `stonks`): https://pypi.org/project/stonker/
 
 ## Stack & environment
 - Python >=3.11; deps: torch, numpy, pandas, yfinance, click, pyarrow, tqdm.
