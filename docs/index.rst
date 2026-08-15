@@ -102,20 +102,33 @@ variance then gives the predictive covariance of returns:
 Portfolio Objective
 ~~~~~~~~~~~~~~~~~~~
 
-Mean-variance with the posterior mean and predictive covariance:
+The **principal objective** is the long-only mean-variance problem: given
+expected returns :math:`\mu` and a covariance :math:`\Sigma` of the daily
+returns :math:`r`,
+
+.. math::
+
+   \boxed{\;\max_{w}\; r^\top w - \frac{\gamma}{2}\, w^\top \Sigma w
+   \qquad \text{s.t.} \qquad w \ge 0,\;\; \mathbf{1}^\top w = 1.\;}
+
+The first term is expected portfolio return, the second penalizes portfolio
+variance with risk aversion :math:`\gamma`. It is solved via the softmax
+parametrization :math:`w = \mathrm{softmax}(z_w)`, which enforces both
+constraints structurally, so the outer problem is unconstrained gradient ascent
+(needing only forward products :math:`w^\top \Sigma w`, never
+:math:`\Sigma^{-1}`).
+
+Instantiating :math:`\mu` and :math:`\Sigma` with the Bayesian posterior
+(:math:`m_\mu = B m_z`, :math:`D + B S_z B^\top`) gives the objective the
+model actually optimizes:
 
 .. math::
 
    U(w) = w^\top B\, m_z - \frac{\gamma}{2}\, w^\top
-   \left(D + B\, S_z\, B^\top\right) w,
+   \left(D + B\, S_z\, B^\top\right) w.
 
-solved **long-only** (:math:`w \ge 0`, :math:`\mathbf{1}^\top w = 1`) via the
-softmax parametrization :math:`w = \mathrm{softmax}(z_w)`, which enforces both
-constraints structurally, so the outer problem is unconstrained gradient ascent
-(needing only forward products :math:`w^\top \Sigma w`, never
-:math:`\Sigma^{-1}`). See :doc:`bayesian_factor_model` for the full derivation,
-the prior/estimate interpolation limits, and how the estimator below relates
-to it.
+See :doc:`bayesian_factor_model` for the full derivation, the prior/estimate
+interpolation limits, and how the estimator below relates to it.
 
 Practical Estimation
 ~~~~~~~~~~~~~~~~~~~~

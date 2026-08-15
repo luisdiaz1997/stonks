@@ -79,6 +79,16 @@ condition on and the outer expectation does nothing to it.
 Step 4 — plug into the objective
 --------------------------------
 
+The **principal objective** is the long-only mean-variance problem
+
+.. math::
+
+   \max_{w}\; r^\top w - \frac{\gamma}{2}\, w^\top \Sigma w
+   \qquad \text{s.t.} \qquad w \ge 0,\;\; \mathbf{1}^\top w = 1,
+
+and substituting the posterior mean / predictive covariance for
+:math:`\mu` / :math:`\Sigma` gives the objective the model optimizes:
+
 .. math::
 
    U(w) = w^\top B\, m_z - \frac{\gamma}{2}\, w^\top
