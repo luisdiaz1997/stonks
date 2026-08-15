@@ -20,7 +20,37 @@ Exploratory stock/investment algorithms. Python package + notebooks + CLI.
   Covariance/PCA is done on **returns, not prices** (prices are non-stationary levels; returns are the
   stationary increments — the object we model).
 
+## Mathematical formulation
+
+**Objects.** Prices $P\in\mathbb{R}^{N\times T}$ (adjusted close, N tickers × T days). Daily simple returns
+$$R_{it} = \frac{P_{i,t}}{P_{i,t-1}} - 1 \;\in\; \mathbb{R}^{N\times(T-1)},$$
+the stationary increments we model (never price levels).
+
+**Factor model / denoising.** SVD $R = U S V^\top$; rank-K truncation
+$$X = U_K S_K V_K^\top = \arg\min_{\mathrm{rank}(M)\le K} \|R - M\|_F \quad\text{(Eckart–Young)}.$$
+(The code SVDs non-demeaned $R$ — a deliberate, documented choice.) With $\hat\mu = X\mathbf{1}/T$ (row means) and $X_c$ the row-centered $X$:
+$$\hat C = \tfrac{1}{T-1}R_c R_c^\top \;(\text{sample cov, rank}\le\min(N,T{-}1)),\qquad
+\hat C_K = \tfrac{1}{T-1}X_c X_c^\top \;(\text{rank-}K),$$
+$$\Psi = \operatorname{clip}\!\big(\operatorname{diag}(\hat C) - \operatorname{diag}(\hat C_K),\, 0,\, \infty\big),\qquad
+\boxed{\;\Sigma = \hat C_K + \operatorname{diag}(\Psi)\;}$$
+i.e. low-rank signal + diagonal idiosyncratic noise (the $\Sigma = BB^\top + \Psi$ statistical factor model; equivalently probabilistic PCA). Full-rank and PD even at $N\gg T$, where $\hat C$ is singular (rank $T{-}1$, cond $\sim10^{20}$). Truncation rationale: Marchenko–Pastur — for a pure-noise correlation matrix with $q=N/T$, eigenvalues lie in $[(1-\sqrt q)^2,(1+\sqrt q)^2]$; small singular values are indistinguishable from noise. (Notebooks also scale eigenvector loadings by $\sqrt N$ so noise loadings are $\sim\mathcal N(0,1)$.)
+
+**Optimization.** Long-only mean-variance:
+$$\max_{w}\; \hat\mu^\top w - \tfrac{\gamma}{2}\, w^\top \Sigma w \quad \text{s.t.} \quad w \ge 0,\;\; \mathbf{1}^\top w = 1,$$
+solved by the parametrization $w = \mathrm{softmax}(z)$, which satisfies both constraints **for every** $z$ ⇒ unconstrained gradient **ascent** on $z$ (Adam; only forward products $w^\top\Sigma w$, never $\Sigma^{-1}$). The objective in $z$ is **non-convex** (many local optima) ⇒ $n$ restarts from seeded inits, keep $w^{(r^*)}$ with $r^* = \arg\max_r f(w^{(r)})$ (deterministic: restart $r$ uses seed $+r$).
+
+Reference closed forms (used in notebooks, not in production — they need $\Sigma^{-1}$):
+unconstrained $w^* = \tfrac{1}{\gamma}\Sigma^{-1}\hat\mu$; budget-constrained
+$w^* = \tfrac{1}{\gamma}\big(\Sigma^{-1}\hat\mu - \lambda \Sigma^{-1}\mathbf{1}\big)$,
+$\lambda = \tfrac{\mathbf{1}^\top\Sigma^{-1}\hat\mu - \gamma}{\mathbf{1}^\top\Sigma^{-1}\mathbf{1}}$;
+tangency (max ratio $\hat\mu^\top w / w^\top\Sigma w$) direction $w \propto \Sigma^{-1}\hat\mu$.
+
+**Sparsity geometry.** On the simplex $\|w\|_1 \equiv \mathbf{1}^\top w \equiv 1$ (constant ⇒ L1 penalty is a no-op). Concentration varies via the Herfindahl $H(w)=\sum_i w_i^2 \in [1/N, 1]$; $\operatorname{diag}(\Psi)$ acts as a weighted ridge on $w$, so larger $K$ (smaller $\Psi$) concentrates. Long/short variant (explored, unused): $\|w\|_1 = 1$ with signed $w = z/\|z\|_1$.
+
+**Evaluation.** Portfolio daily return $r_{p,t} = w^\top R_t$; compounded profit $\prod_t(1+r_{p,t}) - 1$; annualization ×252 (trading days) for return, ×$\sqrt{252}$ for vol; Sharpe $= \bar r_p / \mathrm{std}(r_p)\cdot\sqrt{252}$.
+
 ## The core pipeline (`stonks/portfolio.py` → `optimize_portfolio`)
+
 1. Slice last `months` months from cached 2y daily prices, `dropna` → returns matrix R (N stocks × T days).
 2. **Factor-model covariance** (the key idea): SVD of R (non-demeaned — deliberate, documented choice),
    rank-K truncation `X = U_K S_K V_K^T` = denoised returns. Then
