@@ -59,6 +59,43 @@ stonks fetch --top-n 40 --period 1y --field close
 stonks fetch --help
 ```
 
+## Intraday $20 experiment
+
+Intraday research is deliberately isolated from the multi-month portfolio
+optimizer. The first milestone is an offline simulation with a configurable
+account cap; it does **not** authenticate with Robinhood or submit orders. The
+default is $20, but the limit is explicit:
+
+```bash
+stonks intraday backtest --ticker SPY --period 30d --interval 5m
+stonks intraday backtest --ticker AAPL --account-limit 50 --trade-dollars 10
+```
+
+The initial baseline is a long-only opening-range breakout. It observes the
+first 30 minutes, enters only on the bar after a completed breakout signal,
+uses at most $5 of fractional shares, allows at most one trade per day, applies
+slippage, and always exits before carrying a position overnight. SPY is the
+default only because it is a liquid benchmark for testing—not because the
+project recommends buying it.
+
+You can also replay timestamp-indexed OHLCV data from a local CSV:
+
+```bash
+stonks intraday backtest --csv-file bars.csv --account-limit 20 --trade-dollars 5
+```
+
+The stages for this experiment are intentionally separate:
+
+1. Offline replay and tests (current stage).
+2. A stateful paper runner that watches live bars but submits no orders.
+3. A guarded Robinhood runner using the existing `robin_stocks` integration,
+   with broker-state reconciliation and a hard $20 exposure ceiling.
+
+`yfinance` is suitable for learning and historical experiments, not as the
+sole price source for live execution. A positive backtest is not evidence that
+the strategy will remain profitable after latency, spreads, fractional-order
+behavior, taxes, or changing market conditions.
+
 Generate a portfolio recommendation without placing any orders:
 
 ```bash
