@@ -23,7 +23,11 @@ import pandas as pd
 from .config import Settings
 
 # NASDAQ Trader symbol directory. Pipe-delimited text files, refreshed daily.
-_BASE_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/"
+# The HTTPS endpoint sits behind an Imperva/Incapsula bot challenge that serves
+# a ~200-byte HTML page to non-browser clients; the classic FTP mirror serves
+# the same files unauthenticated, so we try HTTPS first and fall back to FTP.
+_HTTPS_BASE = "https://www.nasdaqtrader.com/dynamic/SymDir/"
+_FTP_BASE = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/"
 _NASDAQ_LISTED = "nasdaqlisted.txt"
 _OTHER_LISTED = "otherlisted.txt"
 
@@ -58,24 +62,48 @@ _DROP_TOKENS = (
 _TICKER_RE = re.compile(r"^[A-Z][A-Z.\-]{0,7}$")
 
 
+def _is_valid_symdir(text: str) -> bool:
+    """True if ``text`` looks like a pipe-delimited symbol-directory file.
+
+    Guards against the Incapsula bot-challenge HTML page the HTTPS endpoint
+    serves to non-browser clients (small, no pipes, starts with ``<``).
+    """
+    head = text[:200].lstrip().lower()
+    return bool(head) and not head.startswith("<") and "|" in text and "symbol" in head
+
+
 def _fetch_txt(filename: str, settings: Settings, force_refresh: bool = False) -> str:
     """Fetch a NASDAQ Trader text file, caching the raw text to disk.
 
-    Reuses the cached file unless ``force_refresh`` or it is older than
-    ``settings.universe_refresh_days``.
+    Reuses the cached file unless ``force_refresh``, it is older than
+    ``settings.universe_refresh_days``, or it fails validation (e.g. a
+    previously cached bot-challenge page).
     """
     path = settings.universe_dir() / filename
     if path.exists() and not force_refresh:
         age_days = (time.time() - path.stat().st_mtime) / 86400
         if age_days <= settings.universe_refresh_days:
-            return path.read_text(encoding="utf-8")
+            cached = path.read_text(encoding="utf-8")
+            if _is_valid_symdir(cached):
+                return cached
 
-    req = urllib.request.Request(_BASE_URL + filename, headers={"User-Agent": _UA})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - trusted URL
-        text = resp.read().decode("utf-8", "ignore")
+    errors: list[str] = []
+    for base in (_HTTPS_BASE, _FTP_BASE):
+        try:
+            req = urllib.request.Request(base + filename, headers={"User-Agent": _UA})
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - trusted URL
+                text = resp.read().decode("utf-8", "ignore")
+        except Exception as exc:  # noqa: BLE001 - fall through to next source
+            errors.append(f"{base}: {exc!r}")
+            continue
+        if _is_valid_symdir(text):
+            path.write_text(text, encoding="utf-8")
+            return text
+        errors.append(f"{base}: response failed validation (bot challenge or empty)")
 
-    path.write_text(text, encoding="utf-8")
-    return text
+    raise RuntimeError(
+        f"Could not fetch {filename} from NASDAQ Trader: " + "; ".join(errors)
+    )
 
 
 def _read_pipe(text: str) -> pd.DataFrame:
@@ -193,8 +221,15 @@ def load_universe(
     if cache_path.exists() and not force_refresh:
         age_days = (time.time() - cache_path.stat().st_mtime) / 86400
         if age_days <= settings.universe_refresh_days:
-            return pd.read_parquet(cache_path)
+            cached = pd.read_parquet(cache_path)
+            if len(cached) > 0:
+                return cached
 
     df = list_all_common_stocks(settings, force_refresh=force_refresh)
+    if df.empty:
+        raise RuntimeError(
+            "Parsed 0 common stocks from NASDAQ Trader files; refusing to cache "
+            "an empty universe. Delete data/universe/ and retry."
+        )
     df.to_parquet(cache_path, index=False)
     return df
