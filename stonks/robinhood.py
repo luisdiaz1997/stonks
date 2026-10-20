@@ -11,11 +11,17 @@ API changes.  No order is submitted by the CLI without explicit confirmation.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from .config import Settings
 
 
 def allocate_fractional_buys(
@@ -112,10 +118,41 @@ def submit_fractional_buys(
     rh: Any,
     plan: pd.DataFrame,
     account_number: str | None = None,
+    order_interval: float = 2.0,
+    verbose: bool = True,
 ) -> pd.DataFrame:
-    """Submit every row in a confirmed fractional-buy plan."""
+    """Submit every row in a confirmed fractional-buy plan.
+
+    Submissions are throttled: Robinhood rate-limits (HTTP 429) bursts of
+    order POSTs — an unthrottled ~55-order plan was cut off after ~20 — so
+    we wait ``order_interval`` seconds between orders. ``robin_stocks``
+    swallows 429 responses into a ``None`` return, making rate-limit hits
+    indistinguishable from ambiguous failures, so we prevent them rather
+    than detect them.
+
+    On any failed/ambiguous order the loop still stops immediately (an
+    earlier request may have reached Robinhood even if its response did
+    not) and the remaining rows are returned with state ``"not_attempted"``
+    so callers can see exactly what was skipped.
+    """
+    if not math.isfinite(order_interval) or order_interval < 0:
+        raise ValueError("order_interval must be a non-negative finite number")
+
     results: list[dict[str, Any]] = []
-    for ticker, row in plan.iterrows():
+    stopped = False
+    for i, (ticker, row) in enumerate(plan.iterrows()):
+        if stopped:
+            results.append(
+                {
+                    "ticker": ticker,
+                    "dollars": float(row["dollars"]),
+                    "state": "not_attempted",
+                    "order_id": "",
+                    "error": "",
+                }
+            )
+            continue
+
         try:
             raw_response = rh.order_buy_fractional_by_price(
                 ticker,
@@ -124,24 +161,97 @@ def submit_fractional_buys(
                 timeInForce="gfd",
                 extendedHours=False,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - recorded per order below
             raw_response = {"detail": f"request failed: {exc}"}
 
         response = raw_response if isinstance(raw_response, dict) else {}
         error = response.get("detail") or response.get("non_field_errors")
         if not error and not response.get("id"):
             error = "Robinhood returned no order confirmation"
+        state = response.get("state", "error" if error else "submitted")
         results.append(
             {
                 "ticker": ticker,
                 "dollars": float(row["dollars"]),
-                "state": response.get("state", "error" if error else "submitted"),
+                "state": state,
                 "order_id": response.get("id", ""),
                 "error": str(error) if error else "",
             }
         )
-        # Never retry automatically or continue after an ambiguous failure: an
-        # earlier request may have reached Robinhood even if its response did not.
+        if verbose:
+            print(
+                f"[stonks] order {i + 1}/{len(plan)}: {ticker} "
+                f"${float(row['dollars']):,.2f} -> {state}",
+                flush=True,
+            )
+
         if error:
-            break
+            stopped = True
+        elif i < len(plan) - 1:
+            time.sleep(order_interval)
     return pd.DataFrame(results).set_index("ticker")
+
+
+def fetch_order_states(
+    rh: Any, order_ids: list[str], poll_interval: float = 0.5
+) -> dict[str, dict[str, Any]]:
+    """Fetch the live state of submitted orders by id (read-only GETs).
+
+    Returns ``{order_id: {"state": ..., "filled_dollars": ...}}`` where
+    ``filled_dollars`` comes from the executed notional (or price x quantity
+    for non-fractional) and is ``None`` until the order executes.
+    """
+    states: dict[str, dict[str, Any]] = {}
+    for i, order_id in enumerate(order_ids):
+        try:
+            info = rh.get_stock_order_info(order_id)
+        except Exception as exc:  # noqa: BLE001 - recorded per order below
+            info = None
+        info = info if isinstance(info, dict) else {}
+        filled = None
+        notional = info.get("executed_notional")
+        if isinstance(notional, dict) and notional.get("amount") is not None:
+            try:
+                filled = float(notional["amount"])
+            except (TypeError, ValueError):
+                filled = None
+        elif info.get("average_price") and info.get("quantity"):
+            try:
+                filled = float(info["average_price"]) * float(info["quantity"])
+            except (TypeError, ValueError):
+                filled = None
+        states[order_id] = {"state": info.get("state", "unknown"), "filled_dollars": filled}
+        if poll_interval > 0 and i < len(order_ids) - 1:
+            time.sleep(poll_interval)
+    return states
+
+
+def last_orders_path() -> Path:
+    """Where the most recent --execute submission is persisted."""
+    return Settings().cache_dir / "last_robinhood_orders.json"
+
+
+def save_last_orders(results: pd.DataFrame) -> Path:
+    """Persist a submission's tickers/dollars/order ids for later re-checking."""
+    path = last_orders_path()
+    frame = results.reset_index()[["ticker", "dollars", "order_id"]]
+    payload = {
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "orders": frame.to_dict(orient="records"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def load_last_orders() -> pd.DataFrame | None:
+    """Load the previous submission, or None if nothing was saved yet."""
+    path = last_orders_path()
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        frame = pd.DataFrame(payload["orders"]).set_index("ticker")
+    except (ValueError, KeyError, TypeError):
+        return None
+    return frame if not frame.empty else None
