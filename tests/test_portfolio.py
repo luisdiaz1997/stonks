@@ -57,3 +57,23 @@ def test_multi_restart_best_of_n() -> None:
     finals = [h[-1] for h in hist_a]
     obj = float(mu @ w_a - 0.5 * 20.0 * w_a @ Sigma @ w_a)
     assert np.isclose(obj, max(finals), rtol=1e-9)
+
+
+def test_optimize_long_only_keep_restarts_returns_every_restart() -> None:
+    rng = np.random.default_rng(4)
+    n = 25
+    mu = rng.normal(0.001, 0.0005, n)
+    Sigma = np.cov(rng.normal(size=(n, 100)))
+
+    best_w, histories, restarts = _optimize_long_only(
+        mu, Sigma, gamma=20.0, n_restarts=4, iters=300, keep_restarts=True
+    )
+
+    assert len(restarts) == 4 and len(histories) == 4
+    assert all(w.shape == mu.shape for w in restarts)
+    assert np.allclose(restarts[0].sum(), 1.0)
+    # the kept best weights are (numerically) one of the returned restarts
+    assert min(np.abs(w - best_w).max() for w in restarts) < 1e-12
+    # the default return shape is unchanged
+    two = _optimize_long_only(mu, Sigma, gamma=20.0, n_restarts=2, iters=300)
+    assert len(two) == 2

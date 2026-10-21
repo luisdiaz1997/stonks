@@ -56,7 +56,8 @@ def _optimize_long_only(
     lr: float = 0.05,   # smaller = smoother ascent (0.5 made some restarts diverge/drop)
     seed: int = 0,
     n_restarts: int = 1,
-) -> tuple[np.ndarray, list[np.ndarray]]:
+    keep_restarts: bool = False,
+) -> tuple[np.ndarray, list[np.ndarray]] | tuple[np.ndarray, list[np.ndarray], list[np.ndarray]]:
     """Multi-restart long-only softmax optimization (gradient ascent).
 
     Maximizes ``mu'w - (gamma/2) w'Sigma w`` with ``w = softmax(z)`` (so
@@ -66,12 +67,16 @@ def _optimize_long_only(
     and keep the restart with the **highest final objective**.
 
     Returns ``(best_weights, histories)`` where ``histories[r]`` is the
-    objective value at each iteration of restart ``r``.
+    objective value at each iteration of restart ``r``. With
+    ``keep_restarts=True`` a third element is appended: the weights of every
+    restart (aligned with ``histories``), so callers can measure restart-to-
+    restart variability instead of only seeing the winner.
     """
     N = len(mu)
     mu_t = torch.tensor(mu, dtype=torch.float64)
     Sig_t = torch.tensor(Sigma, dtype=torch.float64)
     histories: list[np.ndarray] = []
+    all_weights: list[np.ndarray] = []
     best_w: np.ndarray | None = None
     best_obj = -np.inf
     for r in range(n_restarts):
@@ -91,9 +96,13 @@ def _optimize_long_only(
         final_obj = hist[-1]
         w = torch.softmax(z, dim=0).detach()
         histories.append(hist)
+        if keep_restarts:
+            all_weights.append(w.numpy())
         if final_obj > best_obj:
             best_obj, best_w = final_obj, w.numpy()
     assert best_w is not None
+    if keep_restarts:
+        return best_w, histories, all_weights
     return best_w, histories
 
 
