@@ -1,0 +1,22 @@
+[Unit]
+Description=stonks: sell Robinhood positions that reached their take-profit
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Robinhood credentials (ROBINHOOD_USERNAME, ROBINHOOD_PASSWORD). Missing or
+# empty values make the run fail loudly instead of trading blindly.
+EnvironmentFile=-/etc/stonks/robinhood.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/root/gitclones/stonks
+# A dry run (lists what would be sold) until you have watched the journal for a
+# few days: add --execute --yes to go live.
+ExecStart=/root/gitclones/stonks/.venv/bin/stonks sell --take-profit 8
+# Robinhood, not systemd, is the record of what sold. A failed run is reported,
+# never retried: a sell decided hours late is not the rule that was scheduled.
+Restart=no
+TimeoutStartSec=10min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full

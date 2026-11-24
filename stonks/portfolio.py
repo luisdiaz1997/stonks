@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import torch
 
 from .download import get_prices
 from .returns import to_returns
@@ -72,6 +71,10 @@ def _optimize_long_only(
     restart (aligned with ``histories``), so callers can measure restart-to-
     restart variability instead of only seeing the winner.
     """
+    # Deferred so the broker commands (``stonks sell``, ``stonks orders``) run
+    # on small machines without torch installed.
+    import torch
+
     N = len(mu)
     mu_t = torch.tensor(mu, dtype=torch.float64)
     Sig_t = torch.tensor(Sigma, dtype=torch.float64)

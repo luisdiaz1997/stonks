@@ -9,7 +9,8 @@ Exploratory stock/investment algorithms. Python package + notebooks + CLI.
 - Conda env `stonks` (Python 3.13) has `pip install -e ".[notebooks]"` (jupyter) + pytest.
   Binary: `/Users/luisfcd/opt/miniconda3/envs/stonks/bin/stonks`. Editable install — code changes are live.
 - Jupyter runs on port 8888, notebook-dir = repo root.
-- 17 offline tests (`pytest`): universe parsing/filtering, returns, factor covariance, optimizer.
+- 50 offline tests (`pytest`): universe parsing/filtering, returns, factor covariance, optimizer,
+  Robinhood allocation + take-profit sells, CLI (mocked broker — no network).
 
 ## Data layer
 - `get_prices(top_n, tickers=None, period, interval, field)` → **N×T matrix** (rows=tickers, cols=dates),
@@ -83,7 +84,30 @@ tangency (max ratio $\hat\mu^\top w / w^\top\Sigma w$) direction $w \propto \Sig
 ## Hard constraint: LONG-ONLY (no shorting)
 The trading app doesn't allow short positions. Everything production-facing is the softmax simplex
 (w ≥ 0, Σw = 1). A gross-exposure long/short variant (`‖w‖₁ = 1` via `w = z/‖z‖₁`) was explored in
-`portfolio_short_and_long_stocks.ipynb` but is not the focus.
+`portfolio_short_and_long_stocks.ipynb` but is not the focus. Selling (`stonks sell`) only ever exits a
+long position; nothing goes short.
+
+## Take-profit sells (`stonks/robinhood.py` → `stonks sell`)
+- Rule: sell the **whole position** once its *total* return (price vs Robinhood `average_buy_price`)
+  reaches `--take-profit` (default 8%). Not today's move — both percentages are printed for cross-checking
+  against the app. Checked **once per run** (not continuously), so a spike above the threshold between runs
+  is missed.
+- `select_sells()` is the pure decision; `load_positions()` does one positions GET + one batched quotes GET
+  (the library's `build_holdings()` silently drops positions that error — avoided). A failed read **raises**
+  so a scheduled run can't mistake an outage for "nothing to sell".
+- Skips (kept in the table with a reason): `bought today` (day trade), `open sell order`
+  (`shares_held_for_sells`), `under $1.00`, `no cost basis`, `no quote`.
+- Execution: `order_sell_fractional_by_quantity(ticker, quantity)` — exact share count, GFD, regular hours
+  only (market closed → `--execute` places nothing). Same order loop as buys (`_submit_orders`): 2s
+  throttle, stop at first failed/ambiguous order, rest reported `not_attempted`. Broker state makes reruns
+  idempotent (a sold position is gone; a pending one has `shares_held_for_sells`).
+- Dry run by default; `--execute` confirms; `--execute --yes` is the unattended mode. Submissions persisted to
+  `data/last_robinhood_{orders,sells}.json`; `stonks orders` re-checks both.
+- Server: `deploy/systemd/` timer at 06:35 `America/Los_Angeles` (open is 06:30 PT), dry run until
+  `--execute --yes` is added. torch is imported lazily (inside `_optimize_long_only`) so `sell`/`orders` run
+  without it (`pip install --no-deps` + pandas, robin_stocks, click, tqdm).
+- **Unvalidated**: no backtest of the rule; a real sell order had not been placed when this was written.
+  Unattended login is the operational risk (session expiry + possible device/MFA prompt).
 
 ## Empirical findings (honest, from the notebooks)
 - PCA on **prices**: PC1 = 98.3% = the 2y trend (useless). PCA on **returns**: PC1 ~84% = market factor;
@@ -104,10 +128,16 @@ The trading app doesn't allow short positions. Everything production-facing is t
 - `stonks portfolio --top-n 500 --months 3 --gamma 50 -k 25 --n-restarts 10 --lr 0.05`
   → prints recommended holdings (ticker, weight, company name), weights sum to 1.
   `--force-refresh` re-downloads prices (cache may be a day stale).
+- `stonks portfolio ... --execute [--amount 500]` — buy the recommendation in Robinhood (fractional market
+  buys by dollars, 2s throttle, live confirmation; never sells).
+- `stonks sell --take-profit 8 [--execute] [--yes]` — take-profit sells, dry run by default.
+- `stonks orders` — live status of the most recent buy and sell submissions (read-only).
 
 ## Layout
 - `stonks/`: config.py (Settings), universe.py, download.py (get_prices), returns.py, portfolio.py
-  (optimize_portfolio), cli.py. Exports: get_prices, to_returns, optimize_portfolio, load_universe, Settings.
+  (optimize_portfolio), robinhood.py (login, buy/sell submission, select_sells), cli.py. Exports: get_prices,
+  to_returns, optimize_portfolio, load_universe, Settings.
+- `deploy/systemd/`: `stonks-sell.{service,timer}` for the daily server run (dry run as shipped).
 - `notebooks/`: simple_PCA, PCA_on_returns, mean_variance_portfolio, portfolio_short_window
   (thin wrapper over optimize_portfolio; restarts + training-curve plots), portfolio_oos_test,
   portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio.

@@ -8,6 +8,8 @@ Examples:
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 import pandas as pd
 
@@ -160,7 +162,6 @@ def portfolio(
     from .robinhood import (
         account_buying_power,
         allocate_fractional_buys,
-        fetch_order_states,
         login,
         save_last_orders,
         submit_fractional_buys,
@@ -211,61 +212,70 @@ def portfolio(
     click.echo(results.to_string())
     save_last_orders(results)  # persist ids before anything else can fail
 
-    submitted = results[results["order_id"] != ""]
-    if not submitted.empty:
+    if (results["order_id"] != "").any():
         import time as _time
 
         click.echo("\nWaiting 15s for Robinhood to acknowledge, then checking (read-only)...")
         _time.sleep(15)
-        states = fetch_order_states(rh, submitted["order_id"].tolist())
-        results["live_state"] = results["order_id"].map(
-            lambda oid: states.get(oid, {}).get("state", "")
-        )
-        results["filled_dollars"] = results["order_id"].map(
-            lambda oid: states.get(oid, {}).get("filled_dollars")
-        )
-        confirm = results.loc[
-            results["order_id"] != "",
-            ["dollars", "order_id", "live_state", "filled_dollars"],
-        ]
-        click.echo("\nLive order status:")
-        click.echo(
-            confirm.to_string(
-                formatters={
-                    "dollars": "${:,.2f}".format,
-                    "filled_dollars": lambda v: "—" if v is None or pd.isna(v) else f"${v:,.2f}",
-                }
-            )
-        )
+        _print_live_status(rh, results, "buy")
         click.echo(
             "Queued/unconfirmed GFD orders execute at the next market open; "
             "re-check any time with: stonks orders"
         )
 
+    _fail_on_order_errors(results)
+
+
+def _print_live_status(rh: Any, results: pd.DataFrame, side: str) -> None:
+    """Show the live state of every submitted order in ``results`` (read-only GETs)."""
+    from .robinhood import fetch_order_states
+
+    order_ids = results["order_id"].astype(str)
+    submitted = results[order_ids != ""]
+    states = fetch_order_states(rh, submitted["order_id"].astype(str).tolist())
+    results["live_state"] = order_ids.map(lambda oid: states.get(oid, {}).get("state", ""))
+    results["filled_dollars"] = order_ids.map(
+        lambda oid: states.get(oid, {}).get("filled_dollars")
+    )
+    size = "dollars" if side == "buy" else "quantity"
+    click.echo("\nLive order status:")
+    click.echo(
+        results.loc[submitted.index, [size, "order_id", "live_state", "filled_dollars"]].to_string(
+            formatters={
+                "dollars": "${:,.2f}".format,
+                "quantity": lambda v: f"{v:.6f}",
+                "filled_dollars": lambda v: "—" if v is None or pd.isna(v) else f"${v:,.2f}",
+            }
+        )
+    )
+
+
+def _fail_on_order_errors(results: pd.DataFrame) -> None:
+    """Exit with an error when a submission had failed or never-attempted orders."""
     failures = results[results["error"] != ""]
     skipped = results[results["state"] == "not_attempted"]
-    if not failures.empty:
-        message = (
-            f"{len(failures)} of {len(results)} orders returned an error"
-        )
-        if not skipped.empty:
-            message += f" and {len(skipped)} were never attempted"
-        message += (
-            "; review Robinhood activity and wait a few minutes before "
-            "retrying (order rate limits)"
-        )
-        raise click.ClickException(message)
+    if failures.empty:
+        return
+    message = f"{len(failures)} of {len(results)} orders returned an error"
+    if not skipped.empty:
+        message += f" and {len(skipped)} were never attempted"
+    message += (
+        "; review Robinhood activity and wait a few minutes before "
+        "retrying (order rate limits)"
+    )
+    raise click.ClickException(message)
 
 
 @cli.command("orders")
 def orders_status() -> None:
-    """Re-check the live status of the most recent --execute submission."""
-    from .robinhood import fetch_order_states, load_last_orders, login
+    """Re-check the live status of the most recent --execute submissions."""
+    from .robinhood import load_last_orders, login
 
-    saved = load_last_orders()
-    if saved is None:
+    saved = {side: load_last_orders(side) for side in ("buy", "sell")}
+    if all(frame is None for frame in saved.values()):
         raise click.ClickException(
-            "no previous submission found (run stonks portfolio --execute first)"
+            "no previous submission found (run stonks portfolio --execute "
+            "or stonks sell --execute first)"
         )
 
     click.echo("Authenticating with Robinhood (read-only)...")
@@ -274,27 +284,157 @@ def orders_status() -> None:
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
-    tracked = saved[saved["order_id"].astype(str) != ""]
-    if tracked.empty:
+    checked_any = False
+    for side, frame in saved.items():
+        if frame is None or (frame["order_id"].astype(str) == "").all():
+            continue
+        checked_any = True
+        click.echo(f"\n{side.capitalize()} orders:")
+        _print_live_status(rh, frame, side)
+        filled = frame["filled_dollars"].fillna(0.0).sum()
+        planned = f" of ${frame['dollars'].sum():,.2f}" if side == "buy" else " in proceeds"
+        click.echo(f"\nfilled so far: ${filled:,.2f}{planned}")
+
+    if not checked_any:
         raise click.ClickException("the saved submission has no order ids to check")
 
-    states = fetch_order_states(rh, tracked["order_id"].tolist())
-    saved["live_state"] = saved["order_id"].map(
-        lambda oid: states.get(oid, {}).get("state", "")
+
+def _dollars(value: float) -> str:
+    """$1.23, or $0.1234 for sub-dollar prices."""
+    return f"${value:,.2f}" if value >= 1 else f"${value:,.4f}"
+
+
+def _percent(value: float) -> str:
+    return f"{value:+.2f}%"
+
+
+@cli.command()
+@click.option(
+    "--take-profit",
+    type=click.FloatRange(min=0.1),
+    default=8.0,
+    show_default=True,
+    help="Sell at this total return in percent (price vs. average buy price).",
+)
+@click.option(
+    "--execute",
+    is_flag=True,
+    default=False,
+    help="After confirmation, sell the triggered positions in Robinhood.",
+)
+@click.option(
+    "--yes",
+    "assume_yes",
+    is_flag=True,
+    default=False,
+    help="With --execute, skip the confirmation prompt (for scheduled runs).",
+)
+def sell(take_profit: float, execute: bool, assume_yes: bool) -> None:
+    """Sell positions that reached a take-profit threshold (dry run by default)."""
+    from .robinhood import (
+        account_buying_power,
+        load_positions,
+        login,
+        market_status,
+        save_last_orders,
+        select_sells,
+        submit_fractional_sells,
     )
-    saved["filled_dollars"] = saved["order_id"].map(
-        lambda oid: states.get(oid, {}).get("filled_dollars")
-    )
+
+    if assume_yes and not execute:
+        raise click.UsageError("--yes requires --execute")
+
+    click.echo("Authenticating with Robinhood (no orders are submitted yet)...")
+    try:
+        rh = login()
+        _, account_number = account_buying_power(rh)
+        is_trading_day, in_session = market_status(rh)
+        positions = load_positions(rh, account_number=account_number)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not is_trading_day:
+        click.echo("\nUS market is closed today; prices are the last regular-session close.")
+    elif not in_session:
+        click.echo(
+            "\nUS market is outside regular hours (9:30 AM-4:00 PM ET); "
+            "prices are the last close."
+        )
     click.echo(
-        saved.to_string(
+        f"\nTake-profit rule: sell at +{take_profit:g}% total return (price vs. average buy price)"
+    )
+    if positions.empty:
+        click.echo("No open positions.")
+        return
+
+    plan = select_sells(positions, take_profit)
+    action = plan["skip"].where(plan["skip"] != "", "SELL")
+    display = plan.assign(action=action).drop(columns="sell")
+    click.echo(
+        display[
+            [
+                "quantity",
+                "avg_buy_price",
+                "price",
+                "value",
+                "total_return_pct",
+                "day_change_pct",
+                "action",
+            ]
+        ].to_string(
             formatters={
-                "dollars": "${:,.2f}".format,
-                "filled_dollars": lambda v: "—" if v is None or pd.isna(v) else f"${v:,.2f}",
+                "quantity": lambda v: f"{v:.6f}",
+                "avg_buy_price": _dollars,
+                "price": _dollars,
+                "value": "${:,.2f}".format,
+                "total_return_pct": _percent,
+                "day_change_pct": _percent,
             }
         )
     )
-    total_filled = saved["filled_dollars"].fillna(0.0).sum()
-    click.echo(f"\nfilled so far: ${total_filled:,.2f} of ${saved['dollars'].sum():,.2f}")
+
+    to_sell = plan[plan["sell"]]
+    if to_sell.empty:
+        click.echo("\nNo position reached the threshold; nothing to sell.")
+        return
+    click.echo(
+        f"\n{len(to_sell)} of {len(plan)} positions to sell, about ${to_sell['value'].sum():,.2f}."
+    )
+
+    if not execute:
+        click.echo("Dry run: no orders were submitted. Add --execute to sell.")
+        return
+    if not in_session:
+        click.echo("Market closed: no orders were submitted (sells are regular-hours orders).")
+        return
+    click.echo(
+        "Each order sells the full position as a GFD regular-hours fractional market "
+        "sell, throttled 2s apart."
+    )
+    if not assume_yes and not click.confirm(
+        f"Sell these {len(to_sell)} positions in Robinhood?", default=False
+    ):
+        click.echo("Canceled; no orders were submitted.")
+        return
+
+    try:
+        results = submit_fractional_sells(rh, to_sell, account_number=account_number)
+    except Exception as exc:
+        raise click.ClickException(f"Robinhood order submission failed: {exc}") from exc
+
+    click.echo("\nRobinhood order responses:")
+    click.echo(results.to_string(formatters={"quantity": lambda v: f"{v:.6f}"}))
+    save_last_orders(results, "sell")  # persist ids before anything else can fail
+
+    if (results["order_id"] != "").any():
+        import time as _time
+
+        click.echo("\nWaiting 15s for Robinhood to acknowledge, then checking (read-only)...")
+        _time.sleep(15)
+        _print_live_status(rh, results, "sell")
+        click.echo("Re-check any time with: stonks orders")
+
+    _fail_on_order_errors(results)
 
 
 
