@@ -437,6 +437,137 @@ def sell(take_profit: float, execute: bool, assume_yes: bool) -> None:
     _fail_on_order_errors(results)
 
 
+@cli.group()
+def intraday() -> None:
+    """Run constrained intraday research experiments (no broker orders)."""
+
+
+@intraday.command("backtest")
+@click.option(
+    "--ticker",
+    default="SPY",
+    show_default=True,
+    help="Research symbol. SPY is only a liquid baseline, not a recommendation.",
+)
+@click.option("--period", default="30d", show_default=True, help="yfinance history window.")
+@click.option(
+    "--interval",
+    type=click.Choice(["1m", "2m", "5m", "15m", "30m", "60m", "90m"]),
+    default="5m",
+    show_default=True,
+)
+@click.option(
+    "--csv-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Use a local timestamp-indexed OHLCV CSV instead of downloading.",
+)
+@click.option(
+    "--account-limit",
+    "--cash",
+    "account_limit",
+    type=click.FloatRange(min=1.0),
+    default=20.0,
+    show_default=True,
+    help="Starting simulated cash and absolute account cap.",
+)
+@click.option(
+    "--trade-dollars",
+    type=click.FloatRange(min=1.0),
+    default=5.0,
+    show_default=True,
+    help="Maximum notional for each simulated fractional position.",
+)
+@click.option("--opening-minutes", type=click.IntRange(5, 120), default=30, show_default=True)
+@click.option(
+    "--stop-pct",
+    type=click.FloatRange(min=0.01, max=25.0),
+    default=1.0,
+    show_default=True,
+)
+@click.option(
+    "--take-pct",
+    type=click.FloatRange(min=0.01, max=50.0),
+    default=2.0,
+    show_default=True,
+)
+@click.option("--slippage-bps", type=click.FloatRange(min=0.0), default=5.0, show_default=True)
+@click.option("--force-refresh", is_flag=True, help="Bypass the local intraday-data cache.")
+def intraday_backtest(
+    ticker: str,
+    period: str,
+    interval: str,
+    csv_file: str | None,
+    account_limit: float,
+    trade_dollars: float,
+    opening_minutes: int,
+    stop_pct: float,
+    take_pct: float,
+    slippage_bps: float,
+    force_refresh: bool,
+) -> None:
+    """Backtest one long-only opening-range strategy with fractional shares."""
+    from .intraday import (
+        BacktestConfig,
+        OpeningRangeBreakout,
+        download_bars,
+        normalize_bars,
+        run_backtest,
+    )
+
+    if trade_dollars > account_limit:
+        raise click.UsageError("--trade-dollars cannot exceed --account-limit")
+
+    try:
+        if csv_file:
+            raw = pd.read_csv(csv_file, index_col=0, parse_dates=True)
+            bars = normalize_bars(raw)
+            source = csv_file
+        else:
+            bars = download_bars(
+                ticker,
+                period=period,
+                interval=interval,
+                force_refresh=force_refresh,
+            )
+            source = f"{ticker.upper()} via yfinance"
+
+        config = BacktestConfig(
+            initial_cash=account_limit,
+            account_cap=account_limit,
+            trade_notional=trade_dollars,
+            stop_loss_pct=stop_pct / 100,
+            take_profit_pct=take_pct / 100,
+            slippage_bps=slippage_bps,
+        )
+        result = run_backtest(
+            bars,
+            strategy=OpeningRangeBreakout(opening_minutes=opening_minutes),
+            config=config,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    metrics = result.metrics
+    click.echo(f"\nIntraday research backtest: {source}")
+    click.echo(
+        f"{len(bars)} regular-session bars | opening range {opening_minutes}m | "
+        f"next-bar entries | ${trade_dollars:.2f} maximum position"
+    )
+    click.echo("\nResults (simulation only; not evidence of future performance)")
+    click.echo(f"trades:          {int(metrics['trade_count'])}")
+    click.echo(f"final equity:    ${float(metrics['final_equity']):.4f}")
+    click.echo(f"total P&L:       ${float(metrics['total_pnl']):+.4f}")
+    click.echo(f"total return:    {float(metrics['total_return_pct']):+.3f}%")
+    click.echo(f"win rate:        {float(metrics['win_rate_pct']):.1f}%")
+    click.echo(f"max drawdown:    {float(metrics['max_drawdown_pct']):.3f}%")
+    if not result.trades.empty:
+        display = result.trades.copy()
+        display["entry_time"] = display["entry_time"].map(str)
+        display["exit_time"] = display["exit_time"].map(str)
+        click.echo("\nTrades")
+        click.echo(display.to_string(index=False))
+    click.echo("\nNo Robinhood login occurred and no orders were submitted.")
 
 
 if __name__ == "__main__":

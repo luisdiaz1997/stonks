@@ -9,8 +9,8 @@ Exploratory stock/investment algorithms. Python package + notebooks + CLI.
 - Conda env `stonks` (Python 3.13) has `pip install -e ".[notebooks]"` (jupyter) + pytest.
   Binary: `/Users/luisfcd/opt/miniconda3/envs/stonks/bin/stonks`. Editable install — code changes are live.
 - Jupyter runs on port 8888, notebook-dir = repo root.
-- 50 offline tests (`pytest`): universe parsing/filtering, returns, factor covariance, optimizer,
-  Robinhood allocation + take-profit sells, CLI (mocked broker — no network).
+- 56 offline tests (`pytest`): universe parsing/filtering, returns, factor covariance, optimizer,
+  intraday backtest, Robinhood allocation + take-profit sells, CLI (mocked broker — no network).
 
 ## Data layer
 - `get_prices(top_n, tickers=None, period, interval, field)` → **N×T matrix** (rows=tickers, cols=dates),
@@ -154,9 +154,10 @@ long position; nothing goes short.
   (thin wrapper over optimize_portfolio; restarts + training-curve plots), portfolio_oos_test,
   portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio,
   portfolio_hyperparam_sweep (γ×K grid, restart statistics), portfolio_walk_forward (rolling validation).
-- **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, `tests/test_intraday.py`,
-  the `stonks intraday` CLI group and the README's intraday section) lives only on
-  `experiment/intraday-backtest`, which is `master` plus that experiment and nothing else.
+- **This branch is `master` plus the intraday experiment, nothing else.** The experiment is
+  `stonks/intraday/` (an offline opening-range-breakout backtest under a configurable account cap; it never
+  logs in to Robinhood or places orders), `tests/test_intraday.py`, the `stonks intraday` CLI group and the
+  README's intraday section. It is kept off `master` until it is wanted.
 - `tests/`: offline, synthetic data — no network.
 - `docs/`: Sphinx sources for Read the Docs (built from `master`). `api.rst` is the API reference;
   `deployment.rst` includes `deploy/README.md` verbatim (through `myst-parser`, so the two cannot drift).
