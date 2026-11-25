@@ -108,7 +108,16 @@ long position; nothing goes short.
   drop-in (`deploy/systemd/live/override.conf`). torch is imported lazily (inside `_optimize_long_only`) so
   `sell`/`orders` run without it (`pip install --no-deps` + pandas, robin_stocks, click, tqdm).
   `deploy/README.md` is the step-by-step deployment guide.
-- **Unvalidated**: no backtest of the rule; a real sell order had not been placed when this was written.
+- **Backtests** (`notebooks/take_profit_*.py`; results and figures in `docs/take_profit.rst`): $1,000 a month
+  into the optimizer's picks every other Monday, selling at +X%. γ=40 with the normal picks leads in both spans.
+  Held accounts: 8–15% is a plateau (+36.9% to +42.5% over 2y; never selling +29.1%). 19% of positions are never
+  sold (median −9.2% at the end). The rule's gains are short-term and realized every year, so after tax
+  never selling can beat the +10% rule unless the leftover losers are sold too; the size of that depends on
+  the investor's rates (`take_profit_taxes.py`). Flipping μ and selling everything every buy day are on the
+  same page. Caveats: the 500-stock list is ranked with hindsight, one mostly-rising stretch of market, no
+  trading costs.
+- A real sell order had not been placed when this was written; the job went live at 10% on 2026-11-24, with
+  its first run the next morning.
   **Re-login is not unattended**: a fresh sign-in triggers an app-approval prompt (confirmed on the
   server), so a run that finds the session expired waits until systemd kills it (10 min) and sells nothing.
 
@@ -153,12 +162,16 @@ long position; nothing goes short.
 - `notebooks/`: simple_PCA, PCA_on_returns, mean_variance_portfolio, portfolio_short_window
   (thin wrapper over optimize_portfolio; restarts + training-curve plots), portfolio_oos_test,
   portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio,
-  portfolio_hyperparam_sweep (γ×K grid, restart statistics), portfolio_walk_forward (rolling validation).
+  portfolio_hyperparam_sweep (γ×K grid, restart statistics), portfolio_walk_forward (rolling validation),
+  and the take-profit backtests as scripts: `take_profit_backtest.py` (the simulator; the others import it),
+  `take_profit_heatmap.py`, `take_profit_paths.py`, `take_profit_taxes.py`. They download their prices on
+  first use; nothing is hard-coded to one machine.
 - **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, `tests/test_intraday.py`,
   the `stonks intraday` CLI group and the README's intraday section) lives only on
   `experiment/intraday-backtest`, which is `master` plus that experiment and nothing else.
 - `tests/`: offline, synthetic data — no network.
 - `docs/`: Sphinx sources for Read the Docs (built from `master`). `api.rst` is the API reference;
+  `take_profit.rst` is the backtest results page, with its figures in `docs/_static/`;
   `deployment.rst` includes `deploy/README.md` verbatim (through `myst-parser`, so the two cannot drift).
 
 ## Known limitations / next steps

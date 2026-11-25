@@ -105,6 +105,10 @@ A run checks only at the moment it runs, so a position that crosses the
 threshold between two runs is only sold if a later run still sees it above.
 `stonks orders` re-checks the latest buy and sell submissions.
 
+How the rule would have done, with heatmaps and a figure of every position
+from the day it was bought, is in the documentation:
+[Take-profit backtests](https://stonker.readthedocs.io/en/latest/take_profit.html).
+
 #### Running it hourly on a server
 
 `deploy/systemd/` holds a systemd timer that runs the dry run every hour through

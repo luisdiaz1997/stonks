@@ -154,6 +154,7 @@ natural closed-form upgrade of the current plug-in estimator.
    :caption: Contents:
 
    bayesian_factor_model
+   take_profit
    api
    deployment
 
