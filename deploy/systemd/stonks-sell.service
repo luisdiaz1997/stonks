@@ -12,7 +12,7 @@ Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/root/gitclones/stonks
 # A dry run (lists what would be sold) until you have watched the journal for a
 # few days: add --execute --yes to go live.
-ExecStart=/root/gitclones/stonks/.venv/bin/stonks sell --take-profit 8
+ExecStart=/root/gitclones/stonks/.venv/bin/stonks sell --take-profit 10
 # Robinhood, not systemd, is the record of what sold. A failed run is reported,
 # never retried: a sell decided hours late is not the rule that was scheduled.
 Restart=no

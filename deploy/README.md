@@ -108,7 +108,7 @@ systemctl show -p ExecStart --value stonks-sell.service    # must show --execute
 ```
 
 The override replaces the service's command with the live one; the unit file
-itself keeps shipping a dry run. The threshold, 8 percent, is the
+itself keeps shipping a dry run. The threshold, 10 percent, is the
 `--take-profit` value in both files.
 
 To return to the dry run, delete the override and reload:
