@@ -101,46 +101,21 @@ stonks sell --take-profit 8 --execute --yes    # no prompt, for scheduled runs
 Orders are placed only during regular US market hours (9:30 AM–4:00 PM ET).
 Positions bought the same day are left alone (a same-day round trip is a day
 trade), as are positions with an open sell order and positions worth under $1.
-A run checks once, so a position that crosses the threshold later in the day is
-only sold if a later run still sees it above. `stonks orders` re-checks the
-latest buy and sell submissions.
+A run checks only at the moment it runs, so a position that crosses the
+threshold between two runs is only sold if a later run still sees it above.
+`stonks orders` re-checks the latest buy and sell submissions.
 
-#### Running it daily on a server
+#### Running it hourly on a server
 
-`deploy/systemd/` holds a timer that runs the dry run at 06:35 Pacific every
-day, five minutes after the open; the command itself skips weekends and
-holidays. The broker commands need neither `torch` nor `yfinance`, so a small
-server can install the package without them:
+`deploy/systemd/` holds a systemd timer that runs the dry run every hour through
+the US session, from 06:32 Pacific (two minutes after the open) until 12:32. The
+broker commands need neither `torch` nor `yfinance`, so a small server can
+install the package without them. The unit ships as a dry run; going live is a
+separate, explicit step.
 
-```bash
-git clone https://github.com/luisdiaz1997/stonks.git /root/gitclones/stonks
-python3 -m venv /root/gitclones/stonks/.venv
-/root/gitclones/stonks/.venv/bin/pip install --no-deps -e /root/gitclones/stonks
-/root/gitclones/stonks/.venv/bin/pip install pandas robin_stocks click tqdm
-```
-
-Put `ROBINHOOD_USERNAME` and `ROBINHOOD_PASSWORD` in `/etc/stonks/robinhood.env`
-(mode 600) and sign in once by hand from that server, because Robinhood has to
-approve the new device:
-
-```bash
-set -a; . /etc/stonks/robinhood.env; set +a
-/root/gitclones/stonks/.venv/bin/stonks sell
-```
-
-Then install the timer and watch each run:
-
-```bash
-cp /root/gitclones/stonks/deploy/systemd/stonks-sell.{service,timer} /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now stonks-sell.timer
-journalctl -u stonks-sell -f
-```
-
-The unit stays a dry run until `--execute --yes` is added to its `ExecStart`.
-Before that, watch several dry-run days in the journal for two things: that the
-numbers match the Robinhood app, and that the session survives or renews without
-a prompt on your phone. An expired session with no credentials in the
-environment fails the run rather than trading.
+[deploy/README.md](deploy/README.md) is the step-by-step guide for a new server:
+install, credentials, the one-time sign-in approval, the timer, going live, and
+what to do when a run fails.
 
 ### Where the data comes from
 

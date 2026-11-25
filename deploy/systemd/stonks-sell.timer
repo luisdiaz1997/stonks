@@ -1,10 +1,12 @@
 [Unit]
-Description=Run stonks sell every day shortly after the US market opens
+Description=Run stonks sell hourly through the US market session
 
 [Timer]
-# 06:35 Pacific: five minutes after the 06:30 open, correct across DST changes.
+# Hourly from two minutes after the 06:30 Pacific open until 12:32: seven runs a
+# session, correct across DST changes. The first run is not at 06:30:00 because
+# Robinhood's quotes can still show the previous close in the opening seconds.
 # The command checks Robinhood's calendar and does nothing on weekends and holidays.
-OnCalendar=*-*-* 06:35:00 America/Los_Angeles
+OnCalendar=*-*-* 06..12:32:00 America/Los_Angeles
 # Never catch up a run missed while the box was off.
 Persistent=false
 

@@ -90,8 +90,8 @@ long position; nothing goes short.
 ## Take-profit sells (`stonks/robinhood.py` → `stonks sell`)
 - Rule: sell the **whole position** once its *total* return (price vs Robinhood `average_buy_price`)
   reaches `--take-profit` (default 8%). Not today's move — both percentages are printed for cross-checking
-  against the app. Checked **once per run** (not continuously), so a spike above the threshold between runs
-  is missed.
+  against the app. Checked **once per run** (not continuously); the shipped timer runs hourly through the
+  session, so a spike above the threshold between two runs is missed.
 - `select_sells()` is the pure decision; `load_positions()` does one positions GET + one batched quotes GET
   (the library's `build_holdings()` silently drops positions that error — avoided). A failed read **raises**
   so a scheduled run can't mistake an outage for "nothing to sell".
@@ -103,11 +103,14 @@ long position; nothing goes short.
   idempotent (a sold position is gone; a pending one has `shares_held_for_sells`).
 - Dry run by default; `--execute` confirms; `--execute --yes` is the unattended mode. Submissions persisted to
   `data/last_robinhood_{orders,sells}.json`; `stonks orders` re-checks both.
-- Server: `deploy/systemd/` timer at 06:35 `America/Los_Angeles` (open is 06:30 PT), dry run until
-  `--execute --yes` is added. torch is imported lazily (inside `_optimize_long_only`) so `sell`/`orders` run
-  without it (`pip install --no-deps` + pandas, robin_stocks, click, tqdm).
+- Server: `deploy/systemd/` timer hourly 06:32–12:32 `America/Los_Angeles` (open is 06:30 PT; first run
+  is at :32 because quotes can lag the opening seconds), dry run until `--execute --yes` is added as a
+  drop-in (`deploy/systemd/live/override.conf`). torch is imported lazily (inside `_optimize_long_only`) so
+  `sell`/`orders` run without it (`pip install --no-deps` + pandas, robin_stocks, click, tqdm).
+  `deploy/README.md` is the step-by-step deployment guide.
 - **Unvalidated**: no backtest of the rule; a real sell order had not been placed when this was written.
-  Unattended login is the operational risk (session expiry + possible device/MFA prompt).
+  **Re-login is not unattended**: a fresh sign-in triggers an app-approval prompt (confirmed on the
+  server), so a run that finds the session expired waits until systemd kills it (10 min) and sells nothing.
 
 ## Empirical findings (honest, from the notebooks)
 - PCA on **prices**: PC1 = 98.3% = the 2y trend (useless). PCA on **returns**: PC1 ~84% = market factor;
@@ -137,10 +140,14 @@ long position; nothing goes short.
 - `stonks/`: config.py (Settings), universe.py, download.py (get_prices), returns.py, portfolio.py
   (optimize_portfolio), robinhood.py (login, buy/sell submission, select_sells), cli.py. Exports: get_prices,
   to_returns, optimize_portfolio, load_universe, Settings.
-- `deploy/systemd/`: `stonks-sell.{service,timer}` for the daily server run (dry run as shipped).
+- `deploy/`: `README.md` (step-by-step deployment guide) and `systemd/` with `stonks-sell.{service,timer}`
+  for the hourly server run (dry run as shipped) and `live/override.conf`, the drop-in that turns it live.
 - `notebooks/`: simple_PCA, PCA_on_returns, mean_variance_portfolio, portfolio_short_window
   (thin wrapper over optimize_portfolio; restarts + training-curve plots), portfolio_oos_test,
   portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio.
+- **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, the hyperparameter-sweep and
+  walk-forward notebooks, `keep_restarts`, the universe FTP fallback) lives on
+  `feat/intraday-paper-trading` and is kept off `master` until it is wanted.
 - `tests/`: offline, synthetic data — no network.
 
 ## Known limitations / next steps
