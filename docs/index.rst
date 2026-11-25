@@ -155,6 +155,7 @@ natural closed-form upgrade of the current plug-in estimator.
 
    bayesian_factor_model
    api
+   deployment
 
 Indices and tables
 ==================

@@ -5,7 +5,7 @@ Exploratory stock/investment algorithms. Python package + notebooks + CLI.
 - **Published on PyPI as `stonker`** (import name `stonks`): https://pypi.org/project/stonker/
 
 ## Stack & environment
-- Python >=3.11; deps: torch, numpy, pandas, yfinance, click, pyarrow, tqdm.
+- Python >=3.11; deps: torch, numpy, pandas, yfinance, click, pyarrow, tqdm, robin_stocks.
 - Conda env `stonks` (Python 3.13) has `pip install -e ".[notebooks]"` (jupyter) + pytest.
   Binary: `/Users/luisfcd/opt/miniconda3/envs/stonks/bin/stonks`. Editable install — code changes are live.
 - Jupyter runs on port 8888, notebook-dir = repo root.
@@ -67,7 +67,7 @@ tangency (max ratio $\hat\mu^\top w / w^\top\Sigma w$) direction $w \propto \Sig
    - **Non-convex in z** (many local optima; a single init is arbitrary — e.g. one seed gave 6 holdings,
      another 46). So: `n_restarts` (default 10) seeded inits (`seed+r`, deterministic), keep the restart
      with the **highest final objective** (gradient ascent). `return_history=True` returns per-iteration
-     objective curves for plotting.
+     objective curves for plotting; `keep_restarts=True` also returns every restart's weights.
    - `lr=0.05` default: lr=0.5 made ~3/10 restarts overshoot (curves drop from peak); 0.05 ascends
      monotonically to the same optimum.
 4. Output: ticker→weight DataFrame (≥ min_weight, renormalized to sum 1).
@@ -125,6 +125,14 @@ long position; nothing goes short.
   the sparsity dial** — no extra machinery.
 - Max-ratio (tangency μ'w/w'Σw) + jitter (Σ+λI = ridge) explored in `max_ratio_portfolio.ipynb`;
   closed-form Σ⁻¹μ overfits even jittered; long-only softmax ratio is the robust version.
+- **Restart dispersion is ~zero** (`portfolio_hyperparam_sweep`, 30 restarts at lr=0.005, whole γ×K grid):
+  every config converges to the same portfolio across restarts (the objective is strictly concave in w
+  with the PD factor-model Σ), so sweep differences are γ/K/window, not seed luck.
+- **Walk-forward** (`portfolio_walk_forward`: 6 rolling 3m-train / 1m-test windows over the cached 2y of
+  top-500 returns, full γ×K grid, 5 restarts): the single-window sweep winner (K=40, γ=5, +17.8% in Sept)
+  ranks only 5th of 30 by mean with a −28.0% worst month. The K=40 row dominates the table and γ acts as
+  its tail-risk dial (γ=40: +4.2% mean / −1.8% worst / best Sharpe; γ=10: +5.2% / −14.8%). Anchor
+  K=25/γ=40 is the most stable but lower mean; 1/N mean +1.05%.
 
 ## CLI (click)
 - `stonks fetch --tickers AAPL,MSFT --period 1y` / `--top-n 40` — fetch N×T matrix.
@@ -144,14 +152,18 @@ long position; nothing goes short.
   for the hourly server run (dry run as shipped) and `live/override.conf`, the drop-in that turns it live.
 - `notebooks/`: simple_PCA, PCA_on_returns, mean_variance_portfolio, portfolio_short_window
   (thin wrapper over optimize_portfolio; restarts + training-curve plots), portfolio_oos_test,
-  portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio.
-- **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, the hyperparameter-sweep and
-  walk-forward notebooks, `keep_restarts`, the universe FTP fallback) lives on
-  `feat/intraday-paper-trading` and is kept off `master` until it is wanted.
+  portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio,
+  portfolio_hyperparam_sweep (γ×K grid, restart statistics), portfolio_walk_forward (rolling validation).
+- **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, `tests/test_intraday.py`,
+  the `stonks intraday` CLI group and the README's intraday section) lives only on
+  `experiment/intraday-backtest`, which is `master` plus that experiment and nothing else.
 - `tests/`: offline, synthetic data — no network.
+- `docs/`: Sphinx sources for Read the Docs (built from `master`). `api.rst` is the API reference;
+  `deployment.rst` includes `deploy/README.md` verbatim (through `myst-parser`, so the two cannot drift).
 
 ## Known limitations / next steps
-- Survivorship bias (today's listings only). Single OOS window → **walk-forward evaluation** is the
-  obvious next step. μ̂ still unused productively (Black-Litterman / shrinkage would be principled).
+- Survivorship bias (today's listings only). Walk-forward evaluation exists (`portfolio_walk_forward`),
+  but its training windows overlap, the config is chosen with hindsight, and it covers a single regime.
+  μ̂ still unused productively (Black-Litterman / shrinkage would be principled).
 - yfinance unofficial + rate-limited; intraday limited to last ~60 days.
 - In-sample recommendations only; validate before believing any Sharpe.

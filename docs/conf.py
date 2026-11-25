@@ -24,6 +24,8 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
     'sphinx_autodoc_typehints',
+    # Markdown files can then be pulled into these RST pages (see deployment.rst).
+    'myst_parser',
 ]
 
 templates_path = ['_templates']
