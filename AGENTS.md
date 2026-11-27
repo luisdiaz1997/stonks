@@ -194,6 +194,10 @@ long position; nothing goes short.
   caps it at 430 MB and makes it the first process the kernel would kill. It must never overlap the sell job's
   minutes, which is why it starts 75 minutes before the open.
 - Status checks for more than ten orders poll a second apart, not half, to stay inside the rate limit.
+- Switched on 2026-11-27. First live sell-everything: Mon 2026-11-30 12:50 PT; first pick and buy: Tue 2026-12-01.
+  The dry run the day before: 81 positions, 56 sellable (about $1,707), 22 bought that day, two under $1, one
+  symbol with no quote (`RVICZZZ`) that the job can never sell. To turn the cycle off:
+  `systemctl disable --now stonks-weekly-pick.timer stonks-weekly-sell.timer stonks-weekly-buy.timer`.
 
 ## Empirical findings (honest, from the notebooks)
 - PCA on **prices**: PC1 = 98.3% = the 2y trend (useless). PCA on **returns**: PC1 ~84% = market factor;
