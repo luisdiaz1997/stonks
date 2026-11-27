@@ -156,6 +156,7 @@ natural closed-form upgrade of the current plug-in estimator.
    bayesian_factor_model
    models
    take_profit
+   lump_sum
    api
    deployment
 

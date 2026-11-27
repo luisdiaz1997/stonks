@@ -130,14 +130,44 @@ long position; nothing goes short.
   sell: +18.3% against +14.7% at +10% and +22.1% against +13.5% at +8%, behind from 13% up. Concentrated (11–13
   names a buy, the top four a third of the money) and about 25% down in its last month. The figure on the docs
   page still has eight rows; the one in `outputs/` has nine.
+- **One sum in from the start** (`notebooks/lump_sum.py`; the simulator's `lump` argument, which also
+  brought `daily` values and a buy day with nothing to deploy being skipped): $24,000 in on 2024-11-04,
+  everything sold and re-bought every other Monday. γ=40 normal: +214% with no sell inside the two weeks,
+  +143% with +10%, and the row rises with the threshold, so never selling inside them is best; +34% at 6
+  months, +149% at 12, worst fall −21%. γ=160 +57%, flipped +19%, dip +41%. The same 500 equal-weight made
+  +62% and SPY +35%; one-year sums from 26 start days ran +32% to +149% and beat SPY in all 26, which is
+  more likely the hindsight-ranked list at work than a real edge. Not on the docs page, and not a forecast.
+- **K on one sum** (`notebooks/lump_sum_k.py`; `lump_sum_paths.py` draws every threshold's path for one
+  setting): $24,000 in on 2024-11-04, everything sold and re-bought every other Monday, γ=40, no sell inside
+  the two weeks: K=5 +99% (88 names a buy, worst fall −9%), K=10 +95%, K=15 +116%, K=20 +145%, K=25 +214%,
+  K=30 +234%, K=35 +222%, K=40 +222% (19 names, −20%). At every K the sell inside the two weeks only costs,
+  and the loosest thresholds come closest to none. At γ=160 the same account makes +56.5% with none and +20%
+  to +56% across thresholds, below the equal-weight basket of the same 500 (+62%). The picks cache is now
+  written as each recommendation arrives, `WORKERS` sets the pool size, and K travels with its task. Same
+  caveats as the rest: not a forecast.
+- **Rhythm on one sum** (`notebooks/lump_sum_cadence.py`; `_buy_days` now knows "weekly" and "bimonthly", and the
+  weekly picks cache starts from the every-other-Monday one): γ=40, K=25, $24,000 in on 2024-11-04, everything
+  sold and re-bought at every buy day, no sell inside the period: weekly +259%, every two weeks +214%, monthly
+  +284%, every two months +303%. With a +10% sell inside the period: +184%, +143%, +103%, +56%, because the
+  proceeds wait for the next re-buy; at +1%: +64%, +51%, +17%, +4%. Worst fall: −20%, −21%, −18%, −31%.
+- **A four-month window, same account** (`lump_sum_cadence.py 2 40 25 4`): with no sell inside the period weekly
+  +150%, every two weeks +167%, monthly +135%, every two months +268%, so below the three-month window in three
+  of the four rhythms; with +10%: +104%, +104%, +41%, +37%. With a two-month window (`... 2 40 25 2`): +162%,
+  +166%, +210%, +300%; with +10%: +121%, +93%, +84%, +81%. So of two, three and four months the usual three did
+  best at every rhythm with no sell inside the period, and its worst falls were the shallowest. The window
+  length travels with each task (`months`) and is in the picks cache's name (`_m2`, `_m4`).
+- **Speed**: the backtest module caps each process's maths helper threads at one (set before numpy and torch
+  load). Without it, workers running side by side each spun up their own team and took 60 s to minutes a job
+  where a lone one takes 22; with it, eight side by side take about 35 s each. None of this is on the docs
+  page, and none of it is a forecast.
 - **Every setting travels with its task** (`_recommend(i, gamma, flip, dip, weight, last)`; a worker keeps none).
   macOS starts worker processes fresh, so
   before this a worker took γ and the flip from the command line's first arguments, not from what a script had
   set on the module: on a cache miss, `take_profit_heatmap.py` and the tax and path scripts would have computed
   picks at the wrong γ and unflipped, under the intended cache name. The cached picks were checked afterwards by
   rebuilding one buy day per setting with the settings passed in; they match.
-- A real sell order had not been placed when this was written; the job went live at 10% on 2026-11-24, with
-  its first run the next morning.
+- The job went live at 10% on 2026-11-24, and made its first live sale on 2026-11-25 (GKOS at +11.2%, the
+  order filled). The hourly runs never failed to authenticate in their first three days.
   **Re-login is not unattended**: a fresh sign-in triggers an app-approval prompt (confirmed on the
   server), so a run that finds the session expired waits until systemd kills it (10 min) and sells nothing.
 
@@ -185,8 +215,13 @@ long position; nothing goes short.
   portfolio_hyperparam_sweep (γ×K grid, restart statistics), portfolio_walk_forward (rolling validation),
   and the take-profit backtests as scripts: `take_profit_backtest.py` (the simulator; the others import it),
   `take_profit_heatmap.py`, `take_profit_paths.py`, `take_profit_taxes.py`, `stop_loss_heatmap.py` (the
-  simulator's `stop` argument), and `pick_trends.py` (the three ways of picking drawn on one day, for
-  `docs/models.rst`). They download their prices on first use; nothing is hard-coded to one machine.
+  simulator's `stop` argument), `pick_trends.py` (the three ways of picking drawn on one day, for
+  `docs/models.rst`), `lump_sum.py` (one sum in from the start, everything sold and re-bought every buy
+  day; the simulator's `lump` argument), `lump_sum_paths.py` (every sell threshold's path for one setting)
+  and `lump_sum_k.py` (the same for several K; `pick K` computes one K's picks with a single worker, so
+  several K can run side by side) and `lump_sum_cadence.py` (weekly, every other Monday, monthly and every two
+  months on one set of Monday picks, at any window length). They download their prices on first use; nothing is
+  hard-coded to one machine.
 - **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, `tests/test_intraday.py`,
   the `stonks intraday` CLI group and the README's intraday section) lives only on
   `experiment/intraday-backtest`, which is `master` plus that experiment and nothing else.
@@ -196,6 +231,9 @@ long position; nothing goes short.
   `models.rst` is the three ways of picking (normal, flipped, dip), each drawn on one day at γ=20, 40 and 160
   in `docs/_static/picks_*.png` by `notebooks/pick_trends.py` (copy them over from `outputs/` after rerunning
   it; the day shown is then the latest close, so the page's text keeps no numbers from one day);
+  `lump_sum.rst` is the one-sum page (which picks, K, rhythm, window length, other start days), with its figures
+  `docs/_static/lump_sum_*.png` copied from `outputs/` after rerunning the `lump_sum_*.py` scripts; it states
+  first that most of the gain is likely the hindsight-ranked list;
   `deployment.rst` includes `deploy/README.md` verbatim (through `myst-parser`, so the two cannot drift).
 
 ## Known limitations / next steps
