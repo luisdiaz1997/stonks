@@ -110,12 +110,32 @@ long position; nothing goes short.
   `deploy/README.md` is the step-by-step deployment guide.
 - **Backtests** (`notebooks/take_profit_*.py`; results and figures in `docs/take_profit.rst`): $1,000 a month
   into the optimizer's picks every other Monday, selling at +X%. γ=40 with the normal picks leads in both spans.
-  Held accounts: 8–15% is a plateau (+36.9% to +42.5% over 2y; never selling +29.1%). 19% of positions are never
+  Held accounts: 8–15% is a plateau (+36.9% to +42.5% over 2y; never selling +29.1%). That lead depends on the end
+  date: over the 2y the +10% rule was behind never selling at 19 of 25 month-ends (by 20% at the end of May 2026)
+  and went ahead in the last month; the second year alone ended level (+14.7% against +13.4%). 19% of positions are never
   sold (median −9.2% at the end). The rule's gains are short-term and realized every year, so after tax
   never selling can beat the +10% rule unless the leftover losers are sold too; the size of that depends on
   the investor's rates (`take_profit_taxes.py`). Flipping μ and selling everything every buy day are on the
   same page. Caveats: the 500-stock list is ranked with hindsight, one mostly-rising stretch of market, no
   trading costs.
+- **Stop-loss on top of the +10% rule** (`notebooks/stop_loss_heatmap.py`, sells checked at the close): for γ=40
+  no level from 1% to 50% beat having no stop over 2y (+40.1%): +20.5% at a 5% stop, +28.9% at 10%, +32.2% at
+  20%, +39.2% at 30%. A stop did help the flipped picks, which are not run. Not on the docs page.
+- **"Buy the dip" picks** (`dip4` on the backtest script: the usual objective on the three months before the last
+  month, plus the flipped one on the last month, its covariance at a tenth of γ; that length and that tenth are
+  `DIP_LAST` and `DIP_WEIGHT`, not varied yet).
+  γ=40, held, the last row of `take_profit_heatmap.py`. Over 2y it is below the normal picks at every threshold
+  from 1% to 50%: best +36.1% at 3% against +42.5% at 13%, +19.0% against +40.1% at the live +10%, never selling
+  +22.1% against +29.1%, and behind at all 25 month-ends. The latest year alone favours it, but only with a tight
+  sell: +18.3% against +14.7% at +10% and +22.1% against +13.5% at +8%, behind from 13% up. Concentrated (11–13
+  names a buy, the top four a third of the money) and about 25% down in its last month. The figure on the docs
+  page still has eight rows; the one in `outputs/` has nine.
+- **Every setting travels with its task** (`_recommend(i, gamma, flip, dip, weight, last)`; a worker keeps none).
+  macOS starts worker processes fresh, so
+  before this a worker took γ and the flip from the command line's first arguments, not from what a script had
+  set on the module: on a cache miss, `take_profit_heatmap.py` and the tax and path scripts would have computed
+  picks at the wrong γ and unflipped, under the intended cache name. The cached picks were checked afterwards by
+  rebuilding one buy day per setting with the settings passed in; they match.
 - A real sell order had not been placed when this was written; the job went live at 10% on 2026-11-24, with
   its first run the next morning.
   **Re-login is not unattended**: a fresh sign-in triggers an app-approval prompt (confirmed on the
@@ -164,14 +184,18 @@ long position; nothing goes short.
   portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio,
   portfolio_hyperparam_sweep (γ×K grid, restart statistics), portfolio_walk_forward (rolling validation),
   and the take-profit backtests as scripts: `take_profit_backtest.py` (the simulator; the others import it),
-  `take_profit_heatmap.py`, `take_profit_paths.py`, `take_profit_taxes.py`. They download their prices on
-  first use; nothing is hard-coded to one machine.
+  `take_profit_heatmap.py`, `take_profit_paths.py`, `take_profit_taxes.py`, `stop_loss_heatmap.py` (the
+  simulator's `stop` argument), and `pick_trends.py` (the three ways of picking drawn on one day, for
+  `docs/models.rst`). They download their prices on first use; nothing is hard-coded to one machine.
 - **Not on `master`, on purpose**: the intraday experiment (`stonks/intraday/`, `tests/test_intraday.py`,
   the `stonks intraday` CLI group and the README's intraday section) lives only on
   `experiment/intraday-backtest`, which is `master` plus that experiment and nothing else.
 - `tests/`: offline, synthetic data — no network.
 - `docs/`: Sphinx sources for Read the Docs (built from `master`). `api.rst` is the API reference;
   `take_profit.rst` is the backtest results page, with its figures in `docs/_static/`;
+  `models.rst` is the three ways of picking (normal, flipped, dip), each drawn on one day at γ=20, 40 and 160
+  in `docs/_static/picks_*.png` by `notebooks/pick_trends.py` (copy them over from `outputs/` after rerunning
+  it; the day shown is then the latest close, so the page's text keeps no numbers from one day);
   `deployment.rst` includes `deploy/README.md` verbatim (through `myst-parser`, so the two cannot drift).
 
 ## Known limitations / next steps
