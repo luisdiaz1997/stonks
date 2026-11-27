@@ -1,0 +1,13 @@
+[Unit]
+Description=Run stonks sell --everything every Monday, ten minutes before the close
+
+[Timer]
+# Ten minutes before the 13:00 Pacific close, after the take-profit job's last
+# run at 12:47. The orders are regular-hours market sells, and a book of a
+# hundred positions takes a few minutes at two seconds an order.
+OnCalendar=Mon *-*-* 12:50:00 America/Los_Angeles
+# Never catch up a run missed while the box was off.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

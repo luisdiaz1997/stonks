@@ -1,0 +1,22 @@
+[Unit]
+Description=stonks: sell every Robinhood position (the first half of the weekly cycle)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Robinhood credentials (ROBINHOOD_USERNAME, ROBINHOOD_PASSWORD). Missing or
+# empty values make the run fail loudly instead of trading blindly.
+EnvironmentFile=-/etc/stonks/robinhood.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/root/gitclones/stonks
+# A dry run (lists every position it would sell) until --execute --yes is added
+# through deploy/systemd/live/weekly-sell-override.conf.
+ExecStart=/root/gitclones/stonks/.venv/bin/stonks sell --everything
+# Robinhood, not systemd, is the record of what sold. A failed run is reported,
+# never retried: a sell decided hours late is not the rule that was scheduled.
+Restart=no
+TimeoutStartSec=10min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full

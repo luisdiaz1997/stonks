@@ -1,0 +1,12 @@
+[Unit]
+Description=Buy Tuesday's saved recommendation just after the open
+
+[Timer]
+# Six minutes after the open, after the take-profit job's 06:32 run, so the
+# two never share the account at once. The recommendation must have been
+# saved that morning; an older one is refused.
+OnCalendar=Tue *-*-* 06:36:00 America/Los_Angeles
+Persistent=false
+
+[Install]
+WantedBy=timers.target

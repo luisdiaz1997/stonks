@@ -173,6 +173,28 @@ long position; nothing goes short.
   **Re-login is not unattended**: a fresh sign-in triggers an app-approval prompt (confirmed on the
   server), so a run that finds the session expired waits until systemd kills it (10 min) and sells nothing.
 
+## Weekly cycle: sell everything on Monday, buy it back on Tuesday
+- `stonks sell --everything [--execute] [--yes]` is the sell loop with the threshold removed. The skips stay
+  (bought today, open sell order, under $1.00, no cost basis, no quote), so the three dust positions under a
+  dollar never go. It passes `stop_on_failure=False`: a rejected order is reported and the run goes on to the
+  next position, so one rejection cannot leave most of the account unsold (each position is still attempted
+  once). The take-profit run keeps stopping at its first failure.
+- Every live `stonks sell` run, take-profit or everything, puts its **filled** orders on `data/sell_ledger.json`
+  (`record_sells`): a queued, unconfirmed or rejected order counts for nothing, a filled order with no reported
+  amount for what the position was worth. `stonks rebuy --pick FILE [--execute] [--yes]` buys a recommendation
+  saved by `stonks portfolio --save FILE` (refused when more than 12 h old) with `cash_to_rebuy()`: the ledger
+  since the last re-buy plus what that re-buy left undeployed, capped at Robinhood's buying power
+  (`record_buy`). So the cycle moves the same money and borrows nothing more; only Monday's proceeds would leave
+  the +10% sales of the week piling up as cash and the invested amount shrinking every week. Money moved by
+  hand is never re-bought.
+- Server: `stonks-weekly-sell` Mon 12:50 PT, `stonks-weekly-pick` Tue 05:15 PT, `stonks-weekly-buy` Tue 06:36
+  PT (all in `deploy/systemd/`). The pick runs from a **second
+  install**, `/root/gitclones/stonks-opt`, with CPU torch and yfinance; the live install has neither. Measured
+  there with a week-old price cache: 14 minutes, 316 MB of process memory, the box down to 71 MB free. Its unit
+  caps it at 430 MB and makes it the first process the kernel would kill. It must never overlap the sell job's
+  minutes, which is why it starts 75 minutes before the open.
+- Status checks for more than ten orders poll a second apart, not half, to stay inside the rate limit.
+
 ## Empirical findings (honest, from the notebooks)
 - PCA on **prices**: PC1 = 98.3% = the 2y trend (useless). PCA on **returns**: PC1 ~84% = market factor;
   nearest-neighbours in PCA space recover sector pairs (JPM~BAC, WMT~COST, AMAT~LRCX).

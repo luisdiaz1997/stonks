@@ -1,5 +1,6 @@
-"""Offline tests for Robinhood dollar-order allocation and take-profit sells."""
+"""Offline tests for Robinhood dollar-order allocation, sells and the ledger of what they brought in."""
 
+import json
 import math
 from datetime import datetime, timezone
 
@@ -9,11 +10,15 @@ import pytest
 
 from stonks.robinhood import (
     allocate_fractional_buys,
+    cash_to_rebuy,
     fetch_order_states,
+    ledger_path,
     load_last_orders,
     load_positions,
     login,
     market_status,
+    record_buy,
+    record_sells,
     save_last_orders,
     select_sells,
     submit_fractional_buys,
@@ -101,9 +106,7 @@ def test_submit_fractional_buys_throttles_between_orders(monkeypatch) -> None:
 def test_submit_fractional_buys_rejects_negative_interval(monkeypatch) -> None:
     _no_sleep(monkeypatch)
 
-    plan = pd.DataFrame(
-        {"target_weight": [1.0], "dollars": [50.0]}, index=["AAPL"]
-    )
+    plan = pd.DataFrame({"target_weight": [1.0], "dollars": [50.0]}, index=["AAPL"])
     with pytest.raises(ValueError, match="order_interval"):
         submit_fractional_buys(object(), plan, order_interval=-1.0)
 
@@ -146,7 +149,8 @@ def test_fetch_order_states_reports_live_state_and_fills() -> None:
             raise RuntimeError("boom")
 
     states = fetch_order_states(
-        FakeRobinhood(), ["id-filled", "id-legacy", "id-queued", "id-broken"],
+        FakeRobinhood(),
+        ["id-filled", "id-legacy", "id-queued", "id-broken"],
         poll_interval=0,
     )
 
@@ -234,6 +238,17 @@ def test_select_sells_measures_total_and_today_separately() -> None:
 def test_select_sells_rejects_unusable_threshold(threshold: float) -> None:
     with pytest.raises(ValueError, match="take_profit_pct"):
         select_sells(_positions(), take_profit_pct=threshold)
+
+
+def test_select_sells_everything_sells_what_the_take_profit_would_spare() -> None:
+    plan = select_sells(_positions(), take_profit_pct=None)
+
+    # GOOG is 7% up, under the take-profit, and goes too; what cannot be sold cleanly still stays
+    assert list(plan[plan["sell"]].index) == ["AAPL", "MSFT", "GOOG"]
+    assert plan.loc["GOOG", "skip"] == ""
+    assert plan.loc["TSLA", "skip"] == "bought today"
+    assert plan.loc["NVDA", "skip"] == "open sell order"
+    assert plan.loc["F", "skip"] == "under $1.00"
 
 
 class _FakeRobinhood:
@@ -364,6 +379,25 @@ def test_submit_fractional_sells_the_exact_quantity(monkeypatch) -> None:
     assert (results["state"] == "queued").all()
 
 
+def test_submit_fractional_sells_can_go_on_past_a_failed_order(monkeypatch) -> None:
+    _no_sleep(monkeypatch)
+
+    class FakeRobinhood:
+        def order_sell_fractional_by_quantity(self, ticker, *args, **kwargs):
+            if ticker == "MSFT":
+                return {"detail": "rejected"}
+            return {"id": f"order-{ticker}", "state": "queued"}
+
+    plan = pd.DataFrame({"quantity": [1.0, 2.0, 3.0]}, index=["AAPL", "MSFT", "GOOG"])
+
+    results = submit_fractional_sells(FakeRobinhood(), plan, stop_on_failure=False)
+
+    # every position is attempted once, so none is left unsold and none is sold twice
+    assert list(results["state"]) == ["queued", "error", "queued"]
+    assert results.loc["MSFT", "error"] == "rejected"
+    assert results.loc["GOOG", "order_id"] == "order-GOOG"
+
+
 def test_submit_fractional_sells_stops_after_ambiguous_failure(monkeypatch) -> None:
     _no_sleep(monkeypatch)
 
@@ -411,3 +445,63 @@ def test_login_explains_missing_credentials_when_it_cannot_prompt(monkeypatch) -
     monkeypatch.setattr(rh, "login", prompt_hits_closed_stdin)
     with pytest.raises(RuntimeError, match="ROBINHOOD_USERNAME"):
         login()
+
+
+def _submission() -> pd.DataFrame:
+    """Four sell orders as a run sees them after its status check: two filled, one queued, one rejected."""
+    return pd.DataFrame(
+        {
+            "value": [108.0, 216.0, 53.5, 20.0],
+            "state": ["unconfirmed", "unconfirmed", "unconfirmed", "error"],
+            "order_id": ["a", "b", "c", ""],
+            "error": ["", "", "", "rejected"],
+            "live_state": ["filled", "filled", "queued", ""],
+            "filled_dollars": [107.9, None, None, None],
+        },
+        index=pd.Index(["AAPL", "MSFT", "GOOG", "F"], name="ticker"),
+    )
+
+
+def _ledger_in(tmp_path, monkeypatch) -> None:
+    import stonks.robinhood as rb
+    from stonks.config import Settings
+
+    monkeypatch.setattr(rb, "Settings", lambda: Settings(cache_dir=tmp_path))
+
+
+def test_record_sells_counts_only_what_robinhood_says_filled(tmp_path, monkeypatch) -> None:
+    _ledger_in(tmp_path, monkeypatch)
+
+    proceeds = record_sells("take-profit", _submission())
+
+    # the filled order that reported no amount counts for what the position was worth
+    assert proceeds == pytest.approx(107.9 + 216.0)
+    assert cash_to_rebuy() == (pytest.approx(323.9), 1)
+    events = json.loads(ledger_path().read_text(encoding="utf-8"))
+    assert [(event["kind"], event["submitted"], event["filled"]) for event in events] == [
+        ("take-profit", 3, 2)
+    ]
+
+
+def test_cash_to_rebuy_runs_from_the_last_rebuy_and_keeps_what_it_left(
+    tmp_path, monkeypatch
+) -> None:
+    _ledger_in(tmp_path, monkeypatch)
+    assert cash_to_rebuy() == (0.0, 0)  # nothing has been sold yet
+
+    record_sells("take-profit", _submission())
+    record_sells("everything", _submission())
+    assert cash_to_rebuy() == (pytest.approx(2 * 323.9), 2)
+
+    record_buy(available=647.8, budget=500.0, submitted=420.0)
+    assert cash_to_rebuy() == (pytest.approx(647.8 - 420.0), 0)  # capped and unsent money waits
+
+    record_sells("take-profit", _submission())
+    assert cash_to_rebuy() == (pytest.approx(227.8 + 323.9), 1)
+
+
+def test_cash_to_rebuy_tolerates_a_missing_or_damaged_ledger(tmp_path, monkeypatch) -> None:
+    _ledger_in(tmp_path, monkeypatch)
+    assert cash_to_rebuy() == (0.0, 0)
+    ledger_path().write_text("{not json", encoding="utf-8")
+    assert cash_to_rebuy() == (0.0, 0)

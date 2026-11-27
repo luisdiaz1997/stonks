@@ -1,0 +1,13 @@
+[Unit]
+Description=Compute Tuesday's recommendation before the open
+
+[Timer]
+# An hour and a quarter before the 06:30 Pacific open. With a week-old price
+# cache the run downloads the whole universe first, about twenty-five minutes
+# on a small box, and it has to be over before the take-profit job's first run
+# at 06:32. Before the open also means Monday's close is the last bar it sees.
+OnCalendar=Tue *-*-* 05:15:00 America/Los_Angeles
+Persistent=false
+
+[Install]
+WantedBy=timers.target

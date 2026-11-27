@@ -122,6 +122,16 @@ separate, explicit step.
 install, credentials, the one-time sign-in approval, the timer, going live, and
 what to do when a run fails.
 
+#### Selling everything weekly and buying it back
+
+The same box can run the weekly rhythm: `stonks sell --everything` every Monday
+before the close, and `stonks rebuy` on Tuesday after the open, which buys the
+optimizer's recommendation with what the sells brought in since the last
+re-buy. Each sell run records its filled orders, so the cycle moves the same
+money around and borrows nothing more. The recommendation is computed in a
+second install that has `torch`; the live one keeps running without it. The
+guide's step 7 has the setup.
+
 ### Where the data comes from
 
 - **Prices**: [yfinance](https://github.com/ranaroussi/yfinance) (Yahoo Finance),

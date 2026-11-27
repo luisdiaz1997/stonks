@@ -1,0 +1,19 @@
+[Unit]
+Description=stonks: buy Tuesday's saved recommendation with what the jobs sold (the second half of the weekly cycle)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/stonks/robinhood.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/root/gitclones/stonks
+# A dry run (shows the orders it would place and what they are sized by) until
+# --execute --yes is added through deploy/systemd/live/weekly-buy-override.conf.
+# The amount is whatever the sell runs brought in since the last re-buy.
+ExecStart=/root/gitclones/stonks/.venv/bin/stonks rebuy --pick /root/gitclones/stonks-opt/data/tuesday_pick.json
+Restart=no
+TimeoutStartSec=15min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full

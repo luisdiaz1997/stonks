@@ -1,0 +1,28 @@
+[Unit]
+Description=stonks: compute Tuesday's recommendation and save it (places no orders)
+Wants=network-online.target
+After=network-online.target
+# A price outage is worth a few more tries before the open; then it is left alone.
+StartLimitIntervalSec=70min
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+# The optimizer needs torch and yfinance, which the live install does not have:
+# this runs from a second install that does (the guide, step 7). One maths
+# thread: the box has one core, and the sell job shares it.
+Environment=PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1
+WorkingDirectory=/root/gitclones/stonks-opt
+ExecStart=/root/gitclones/stonks-opt/.venv/bin/stonks portfolio --top-n 500 --months 3 --gamma 40 -k 25 --save data/tuesday_pick.json
+Restart=on-failure
+RestartSec=5min
+# It uses nearly all the spare memory of a small box for a few minutes. With a
+# cap, it is the process that dies if that is ever too much, not the website
+# next door or the sell job.
+MemoryAccounting=yes
+MemoryMax=430M
+OOMScoreAdjust=800
+TimeoutStartSec=70min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full

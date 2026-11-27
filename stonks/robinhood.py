@@ -8,6 +8,12 @@ total return reaches a take-profit threshold.
 
 ``robin_stocks`` uses Robinhood's private API and may stop working when that
 API changes.  No order is submitted by the CLI without explicit confirmation.
+
+Selling and buying again are kept apart on purpose. Every sell the jobs make is
+put on a small ledger (:func:`record_sells`), and ``stonks rebuy`` buys a saved
+recommendation with what that ledger holds since its previous run
+(:func:`cash_to_rebuy`), so a cycle of selling and re-buying moves the same
+money around and borrows nothing more.
 """
 
 from __future__ import annotations
@@ -225,24 +231,28 @@ def load_positions(rh: Any, account_number: str | None = None) -> pd.DataFrame:
     return frame
 
 
-def select_sells(positions: pd.DataFrame, take_profit_pct: float) -> pd.DataFrame:
-    """Mark the positions that reached ``take_profit_pct`` total return.
+def select_sells(positions: pd.DataFrame, take_profit_pct: float | None = None) -> pd.DataFrame:
+    """Mark the positions to sell.
 
-    The return is the price against Robinhood's average buy price — the
-    position's *total* return since purchase, not today's move (both are kept
-    in the frame so the numbers can be checked against the app).  A position
-    is selected only when it can be sold cleanly; every other position stays
-    in the frame with a ``skip`` reason, so a dry run shows all it examined:
+    With ``take_profit_pct``, they are the positions whose total return
+    reached it. Without it, every position is to go. The return is the price
+    against Robinhood's average buy price — the position's *total* return
+    since purchase, not today's move (both are kept in the frame so the
+    numbers can be checked against the app).  A position is selected only
+    when it can be sold cleanly, whichever rule is asked for; every other
+    position stays in the frame with a ``skip`` reason, so a dry run shows
+    all it examined:
 
     * ``bought today`` — selling shares bought the same day is a day trade;
     * ``open sell order`` — some shares are already reserved for a sale;
-    * ``under $1.00`` — too small for a fractional order.
+    * ``under $1.00`` — too small for a fractional order;
+    * ``below X%`` — has not reached the threshold (only with one).
 
     Returns the positions plus ``value``, ``total_return_pct``,
     ``day_change_pct``, ``sell`` and ``skip`` (empty when ``sell`` is True),
     sells first.
     """
-    if not math.isfinite(take_profit_pct) or take_profit_pct <= 0:
+    if take_profit_pct is not None and not (math.isfinite(take_profit_pct) and take_profit_pct > 0):
         raise ValueError("take_profit_pct must be a positive finite number")
 
     plan = positions.copy()
@@ -261,7 +271,7 @@ def select_sells(positions: pd.DataFrame, take_profit_pct: float) -> pd.DataFram
             return "open sell order"
         if row["value"] < 1.0:
             return "under $1.00"
-        if row["total_return_pct"] < take_profit_pct:
+        if take_profit_pct is not None and row["total_return_pct"] < take_profit_pct:
             return f"below {take_profit_pct:g}%"
         return ""
 
@@ -277,11 +287,14 @@ def _submit_orders(
     describe: Callable[[pd.Series], str],
     order_interval: float = 2.0,
     verbose: bool = True,
+    stop_on_failure: bool = True,
 ) -> pd.DataFrame:
     """Submit every row of ``plan`` through ``place(ticker, row)``.
 
     The one order loop behind buy and sell plans; :func:`submit_fractional_buys`
-    documents the throttling and the stop-on-failure policy.
+    documents the throttling and the stop-on-failure policy. With
+    ``stop_on_failure`` off, a failed order is recorded and the loop goes on
+    to the next row, for a plan that has to reach every position.
     """
     if not math.isfinite(order_interval) or order_interval < 0:
         raise ValueError("order_interval must be a non-negative finite number")
@@ -318,7 +331,7 @@ def _submit_orders(
                 flush=True,
             )
 
-        if error:
+        if error and stop_on_failure:
             stopped = True
         elif i < len(plan) - 1:
             time.sleep(order_interval)
@@ -369,6 +382,7 @@ def submit_fractional_sells(
     account_number: str | None = None,
     order_interval: float = 2.0,
     verbose: bool = True,
+    stop_on_failure: bool = True,
 ) -> pd.DataFrame:
     """Submit every row in a confirmed sell plan as a fractional market sell.
 
@@ -376,7 +390,9 @@ def submit_fractional_sells(
     behind: positions bought in dollars are fractional, and converting a
     dollar amount back into shares would strand a remainder.  Orders are GFD
     regular-hours sells under the same throttle and stop-on-failure policy as
-    :func:`submit_fractional_buys`.
+    :func:`submit_fractional_buys`. ``stop_on_failure`` off is for selling a
+    whole account, where one rejected order should not leave the rest unsold;
+    every position is still attempted once, so nothing is ever sold twice.
     """
 
     def place(ticker: str, row: pd.Series) -> Any:
@@ -394,6 +410,7 @@ def submit_fractional_sells(
         lambda row: f"{float(row['quantity']):.6f} shares (sell)",
         order_interval,
         verbose,
+        stop_on_failure,
     )
     return results[["quantity", "state", "order_id", "error"]]
 
@@ -468,3 +485,104 @@ def load_last_orders(side: str = "buy") -> pd.DataFrame | None:
     except (ValueError, KeyError, TypeError):
         return None
     return frame if not frame.empty else None
+
+
+def ledger_path() -> Path:
+    """Where the jobs record what they sold and re-bought: a JSON list of events, newest last."""
+    return Settings().cache_dir / "sell_ledger.json"
+
+
+def _ledger() -> list[dict[str, Any]]:
+    path = ledger_path()
+    if not path.exists():
+        return []
+    try:
+        events = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return (
+        [event for event in events if isinstance(event, dict)] if isinstance(events, list) else []
+    )
+
+
+def _append_ledger(event: dict[str, Any]) -> None:
+    path = ledger_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(path.name + ".part")
+    part.write_text(json.dumps(_ledger() + [event], indent=2), encoding="utf-8")
+    os.replace(part, path)
+
+
+def record_sells(kind: str, results: pd.DataFrame) -> float:
+    """Put a submission of sell orders on the ledger; return what it counts as bringing in.
+
+    Only orders Robinhood reports as filled count, and only for what they
+    filled: a re-buy must never exceed the cash the sells really produced, so
+    an order that is still queued, unconfirmed or unreadable counts for
+    nothing. A filled order with no reported amount counts for what the
+    position was worth when the run looked at it. ``kind`` names the rule
+    that sold, for whoever reads the ledger.
+    """
+    placed = results["order_id"].astype(str) != ""
+    states = (
+        results["live_state"] if "live_state" in results else pd.Series("", index=results.index)
+    )
+    filled = placed & states.isin(["filled", "partially_filled"])
+    dollars = (
+        pd.to_numeric(results["filled_dollars"], errors="coerce")
+        if "filled_dollars" in results
+        else pd.Series(math.nan, index=results.index)
+    )
+    if "value" in results:
+        dollars = dollars.fillna(pd.to_numeric(results["value"], errors="coerce"))
+    proceeds = float(dollars[filled].fillna(0.0).sum())
+    _append_ledger(
+        {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "event": "sell",
+            "kind": kind,
+            "submitted": int(placed.sum()),
+            "filled": int(filled.sum()),
+            "proceeds": round(proceeds, 2),
+        }
+    )
+    return proceeds
+
+
+def record_buy(available: float, budget: float, submitted: float) -> None:
+    """Put a re-buy on the ledger.
+
+    ``submitted`` is what it actually sent to Robinhood. Whatever of
+    ``available`` was not sent, because Robinhood's buying power capped the
+    run or an order failed, is carried to the next re-buy rather than
+    forgotten.
+    """
+    _append_ledger(
+        {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "event": "buy",
+            "available": round(available, 2),
+            "budget": round(budget, 2),
+            "submitted": round(submitted, 2),
+            "carried": round(available - submitted, 2),
+        }
+    )
+
+
+def cash_to_rebuy() -> tuple[float, int]:
+    """What the sells since the last re-buy brought in, and how many sell events that is.
+
+    Anything the last re-buy left undeployed is included, so no proceeds are
+    ever dropped by a run that was cut short.
+    """
+    since: list[dict[str, Any]] = []
+    for event in reversed(_ledger()):
+        since.append(event)
+        if event.get("event") == "buy":
+            break
+    sells = [event for event in since if event.get("event") == "sell"]
+    total = sum(float(event.get("proceeds") or 0.0) for event in sells)
+    last_buy = next((event for event in since if event.get("event") == "buy"), None)
+    if last_buy:
+        total += float(last_buy.get("carried") or 0.0)
+    return round(total, 2), len(sells)

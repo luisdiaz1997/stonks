@@ -35,9 +35,10 @@ Robinhood Execution
 -------------------
 
 Buying turns target weights into dollar orders; ``stonks sell`` exits positions
-once their total return reaches a threshold. Both are dry runs until the CLI's
-``--execute`` is given. See :doc:`deployment` for running the sell job on a
-schedule.
+once their total return reaches a threshold, or all of them with
+``--everything``; ``stonks rebuy`` buys a saved recommendation with what the
+sells brought in. All are dry runs until the CLI's ``--execute`` is given. See
+:doc:`deployment` for running them on a schedule.
 
 .. autofunction:: stonks.robinhood.allocate_fractional_buys
 
@@ -60,3 +61,13 @@ Order Status
 .. autofunction:: stonks.robinhood.fetch_order_states
 
 .. autofunction:: stonks.robinhood.load_last_orders
+
+
+Selling and Buying Again
+------------------------
+
+.. autofunction:: stonks.robinhood.record_sells
+
+.. autofunction:: stonks.robinhood.record_buy
+
+.. autofunction:: stonks.robinhood.cash_to_rebuy
