@@ -180,11 +180,16 @@ def _simulate(
     rebalance: bool = False,                 # True = sell the whole account at every buy day, winners and losers
     record: bool = False,                    # True = also return every position's return at every day's close
     dividends: np.ndarray | None = None,     # days x tickers: cash paid per share held on each ex-dividend day
+    stop: float | None = None,               # also sell a position once its return falls to -stop
 ) -> dict:
     """One account over the span. With ``rebalance`` every buy day starts by
     liquidating everything at that day's close, and the new recommendation is
     bought with all of it; the take-profit rule still applies inside each
     holding window.
+
+    ``stop`` adds a stop-loss: a position is also sold, at that day's close,
+    once its return has fallen to ``-stop`` or below. It is checked at the
+    close under either rule, and it wins when both fire on the same day.
 
     ``dividends`` models dividends paid in cash rather than reinvested in the
     same stock: whoever holds a share the day before its ex-dividend day gets
@@ -265,16 +270,22 @@ def _simulate(
             bought_today[columns] = True
 
         held = (shares > 0) & ~bought_today
-        if rule is not None and held.any():
+        if (rule is not None or stop is not None) and held.any():
             average = cost[held] / shares[held]
+            closing = raw[day, held] / average - 1.0
+            fill = raw[day, held]
+            trigger = np.zeros(len(average), dtype=bool)
             if rule == "close":
-                trigger = raw[day, held] / average - 1.0 >= TAKE
-                fill = raw[day, held]
-            else:
+                trigger = closing >= TAKE
+            elif rule == "touch":
                 trigger = high[day, held] / average - 1.0 >= TAKE
                 # a gap above the target at the open fills at the open, otherwise at the target
                 fill = np.where(opening[day, held] >= (1 + TAKE) * average, opening[day, held],
                                 (1 + TAKE) * average)
+            if stop is not None:
+                stopped = closing <= -stop
+                fill = np.where(stopped, raw[day, held], fill)
+                trigger |= stopped
             trigger &= ~np.isnan(fill)
             sold = np.flatnonzero(held)[trigger]
             if len(sold):
