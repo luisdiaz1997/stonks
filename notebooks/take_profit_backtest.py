@@ -12,6 +12,12 @@ spreads the same $12,000 over every other Monday from the start (26 buys), so
 the two differ only in cadence. "flip" negates the optimizer's expected return,
 which turns it into a long-only portfolio of the stocks it would otherwise
 avoid (the ones that fell over the window) - the "buy the dip" candidate.
+"dip4" buys the dip instead: the objective is the usual one on the three
+months before the last, plus the flipped one on the last month, so what it
+likes best is a stock that rose for three months and then fell. The last
+month's covariance enters the risk penalty with a tenth of gamma. (The four
+is the months of history it needs. How long the fall is measured over, and
+that tenth, are DIP_LAST and DIP_WEIGHT below, for a script that moves them.)
 "sweep" tries every sell threshold from 5% to 15%. Setting the environment
 variable STONKS_BACKTEST_SPAN=2 keeps buying for two years instead of one
 (from November 2024, $24,000 in all, still evaluated on the anniversary); it
@@ -38,6 +44,7 @@ import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -49,11 +56,16 @@ from stonks.robinhood import allocate_fractional_buys
 
 GAMMA = float(sys.argv[1]) if len(sys.argv) > 1 else 160.0
 CADENCE = sys.argv[2] if len(sys.argv) > 2 else "monthly"
-FLAGS = sys.argv[3:]                                    # extra words: "flip", "sweep"
+FLAGS = sys.argv[3:]                                    # extra words: "flip", "sweep", "dip4"
 FLIP = "flip" in FLAGS                                  # negate the expected return
+DIP = "dip4" in FLAGS                                   # buy the dip: up over the three months, down over the last
+DIP_WEIGHT = 0.1                                        # dip: how much the fall's covariance counts in the risk penalty
+DIP_LAST = "m1"                                         # dip: how long the fall is measured over, a key of DIP_LENGTHS
 SWEEP = "sweep" in FLAGS                                # try every sell threshold from 5% to 15%
-ALGO = "Flipped algorithm" if FLIP else "Algorithm"
+ALGO = "Dip algorithm" if DIP else "Flipped algorithm" if FLIP else "Algorithm"
 K, MONTHS = 25, 3                      # the optimizer exactly as it is run
+DIP_LENGTHS = {"w2": pd.Timedelta(weeks=2), "m1": pd.DateOffset(months=1), "m2": pd.DateOffset(months=2)}
+DIP_HISTORY = {"w2": 4, "m1": 4, "m2": 5}               # months of prices it needs: the rise's three, and the fall
 # years of buying; an environment variable so worker processes read it too
 SPAN = int(os.environ.get("STONKS_BACKTEST_SPAN", "1"))
 YEARLY = 12000.0 * SPAN                # $1,000 a month for the whole span
@@ -64,23 +76,37 @@ DATA = "backtest_top500_2y" if SPAN == 1 else "backtest_top500_3y"           # c
 PERIOD = "2y" if SPAN == 1 else "3y"   # how much history those files hold
 
 _CLOSE: pd.DataFrame = None            # set in each worker process by _init
+_FACTOR_COVARIANCE = pf._factor_covariance    # the package's own; a variant is built on top of it each time
+
+
+def _dipped(weight: float, last: str):
+    """The "buy the dip" objective as the one pair (mu, Sigma) the optimizer takes.
+
+    Two objectives summed: the usual one on the three months before the fall,
+    and the flipped one (expected return negated) over the fall itself, which
+    lasts ``DIP_LENGTHS[last]`` and whose covariance counts ``weight`` times
+    in the risk penalty. Each is linear in mu and Sigma, so their sum is the
+    usual objective with ``mu - mu_fall`` and ``Sigma + weight * Sigma_fall``.
+    """
+    rise = pd.DateOffset(months=MONTHS)
+
+    def dipped(returns: pd.DataFrame, K: int) -> tuple[np.ndarray, np.ndarray]:
+        split = returns.columns[-1] - DIP_LENGTHS[last]
+        before = (returns.columns >= split - rise) & (returns.columns < split)
+        mu, sigma = _FACTOR_COVARIANCE(returns.loc[:, before], K)
+        fell, risk = _FACTOR_COVARIANCE(returns.loc[:, returns.columns >= split], K)
+        return mu - fell, sigma + weight * risk
+
+    return dipped
 
 
 def _init() -> None:
-    """Each worker: one torch thread, its own copy of the price history, and the flip if asked."""
+    """Each worker: one torch thread and its own copy of the price history."""
     global _CLOSE
     import torch
 
     torch.set_num_threads(1)
     _CLOSE = pd.read_parquet(_cache("close")).sort_index().drop(columns="SPY")   # stocks only
-    if FLIP:
-        factor_covariance = pf._factor_covariance
-
-        def flipped(returns, K):
-            mu, sigma = factor_covariance(returns, K)
-            return -mu, sigma                       # the one change: expect the opposite
-
-        pf._factor_covariance = flipped
 
 
 def _cache(name: str, data: str | None = None) -> Path:
@@ -112,10 +138,24 @@ def ensure_prices() -> None:
     print(f"[backtest] downloaded {len(tickers)} stocks x {len(fields['Close'])} days of daily bars{note}")
 
 
-def _recommend(i: int) -> pd.Series:
-    """The production recommendation using closes up to the day before ``i``."""
+def _recommend(i: int, gamma: float, flip: bool, dip: bool, weight: float, last: str) -> pd.Series:
+    """The production recommendation using closes up to the day before ``i``.
+
+    The settings travel with the call. A worker process holds no settings of
+    its own: it starts from the module's defaults, which come from the command
+    line, whatever a script has set on the copy of the module it imported.
+    """
     pf.get_prices = lambda **kwargs: _CLOSE.iloc[:i].T      # the only thing swapped
-    weights = pf.optimize_portfolio(top_n=500, months=MONTHS, gamma=GAMMA, K=K)
+    pf._factor_covariance = _FACTOR_COVARIANCE
+    if flip:
+        def flipped(returns, K):
+            mu, sigma = _FACTOR_COVARIANCE(returns, K)
+            return -mu, sigma                       # the one change: expect the opposite
+
+        pf._factor_covariance = flipped
+    elif dip:
+        pf._factor_covariance = _dipped(weight, last)
+    weights = pf.optimize_portfolio(top_n=500, months=DIP_HISTORY[last] if dip else MONTHS, gamma=gamma, K=K)
     return weights["weight"]
 
 
@@ -127,6 +167,10 @@ def load_weights(dates: pd.DatetimeIndex, buy_days: list[int]) -> dict[int, pd.S
     earlier buy days are computed.
     """
     setting = f"weights_g{GAMMA:g}_k{K}_{CADENCE}{'_flip' if FLIP else ''}"
+    if DIP:
+        setting += "_dip4"                           # as proposed: a month-long fall, its covariance at a tenth
+        if DIP_LAST != "m1" or DIP_WEIGHT != 0.1:
+            setting += f"_{DIP_LAST}" + ("" if DIP_WEIGHT == 0.1 else f"_cov{DIP_WEIGHT:g}")
     cache = _cache(setting if SPAN == 1 else f"{setting}_span{SPAN}")
     frame = pd.read_parquet(cache) if cache.exists() else pd.DataFrame()
 
@@ -138,8 +182,10 @@ def load_weights(dates: pd.DatetimeIndex, buy_days: list[int]) -> dict[int, pd.S
 
     missing = [day for day in buy_days if day not in frame.columns]
     if missing:
+        # every setting travels with its task, so a worker cannot still be holding another one's
+        ask = partial(_recommend, gamma=GAMMA, flip=FLIP, dip=DIP, weight=DIP_WEIGHT, last=DIP_LAST)
         with ProcessPoolExecutor(max_workers=8, initializer=_init) as pool:
-            computed = dict(zip(missing, pool.map(_recommend, missing)))
+            computed = dict(zip(missing, pool.map(ask, missing)))
         frame = pd.concat([frame, pd.DataFrame(computed)], axis=1)
         frame[buy_days].to_parquet(cache)
     return {day: frame[day].dropna() for day in buy_days}
@@ -385,8 +431,11 @@ def main() -> None:
     per_buy = YEARLY / len(buy_days)
     spy = {day: pd.Series({"SPY": 1.0}) for day in buy_days}
     first = buy_days[0]
+    history = DIP_HISTORY[DIP_LAST] if DIP else MONTHS       # months of prices the optimizer sees
 
-    print(f"gamma={GAMMA:g}, K={K}, {MONTHS}-month history{' | expected return FLIPPED (dip portfolio)' if FLIP else ''}"
+    aim = (" | BUY THE DIP: the usual objective on the three months plus the flipped one on the last month"
+           if DIP else " | expected return FLIPPED (dip portfolio)" if FLIP else "")
+    print(f"gamma={GAMMA:g}, K={K}, {history}-month history{aim}"
           f"\n{CADENCE}: {len(buy_days)} buys of ${per_buy:,.2f} = ${YEARLY:,.0f} over {SPAN} year{'s' if SPAN > 1 else ''}, "
           f"{dates[first].date()} to {dates[int(dates.searchsorted(END))].date()}")
     algo = load_weights(dates, buy_days)
@@ -394,7 +443,7 @@ def main() -> None:
     # equal weight over exactly the stocks the optimizer could use that month
     equal: dict[int, pd.Series] = {}
     for day in buy_days:
-        window = close[stocks].iloc[:day].loc[dates[day] - pd.DateOffset(months=MONTHS):]
+        window = close[stocks].iloc[:day].loc[dates[day] - pd.DateOffset(months=history):]
         names = window.dropna(axis=1).columns
         equal[day] = pd.Series(1.0 / len(names), index=names)
 

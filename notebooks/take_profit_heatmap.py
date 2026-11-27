@@ -10,17 +10,20 @@ the normal and the flipped optimizer, and two ways of managing the account:
   losers alike, and the new recommendation is bought with all of it (so
   "never" there means no take-profit inside the two-week window).
 
+The last row is a third way of picking, "buy the dip" (``dip4`` in
+take_profit_backtest.py), shown with positions held: the usual objective on
+the three months before the last month, plus the flipped one on the last
+month, so what it likes best is a stock that rose for three months and then
+fell. It looks back four months; everything else is the same.
+
 Cells show the profit or loss as a percentage of the money put in.
 
     python notebooks/take_profit_heatmap.py [span in years, default 1]
 
-One year buys $12,000 from November 2025; two years buys $24,000 from November
-2024. Both are valued on 2026-11-02. The two-year span needs the three-year
-price files; to create them, download with stonks.download._download_raw for
-period "3y" and save its Open, High and Close frames as
-backtest_top500_3y_open/high/close.parquet in the cache. The recommendations
-are computed on first use (about four minutes per setting for each span) and
-cached after that.
+One year buys $12,000 from November 2025; two years buy $24,000 from November
+2024. Both are valued on 2026-11-02. Prices and the optimizer's
+recommendations are downloaded and computed on first use (about four minutes
+per setting for each span) and cached after that.
 
 Writes outputs/take_profit_sweep.png and the same numbers as a CSV.
 Not financial advice.
@@ -47,9 +50,26 @@ import seaborn as sns
 import take_profit_backtest as tb
 
 THRESHOLDS = list(range(1, 51))            # percent; 0 would mean "sell at break-even or better", not a profit target
-CONFIGS = [(160, False), (160, True), (40, False), (40, True)]
-MODES = [(False, "held until the rule sells it"), (True, "everything sold every buy day")]
+SETTINGS = [(160, False, None), (160, True, None), (40, False, None), (40, True, None), (40, False, True)]    # gamma, flipped, buy the dip
+MODE = {False: "held until the rule sells it", True: "everything sold every buy day"}
 OUTPUT = Path(__file__).resolve().parent.parent / "outputs"
+
+
+def layout() -> tuple[list[tuple], list[int]]:
+    """The rows of the heatmap, and where a heavier line goes: before each new setting but the first.
+    The dip picks are shown held only."""
+    rows: list[tuple] = []
+    lines: list[int] = []
+    for gamma, flip, dip in SETTINGS:
+        if rows:
+            lines.append(len(rows))
+        rows += [(gamma, flip, dip, rebalance) for rebalance in ((False, True) if dip is None else (False,))]
+    return rows, lines
+
+
+def label(gamma: int, flip: bool, dip: int | None, rebalance: bool) -> str:
+    picks = "buy the dip, 4 months" if dip else "flipped" if flip else "normal"
+    return f"gamma {gamma}, {picks}\n{MODE[rebalance]}"
 
 
 def main() -> None:
@@ -60,58 +80,53 @@ def main() -> None:
     buy_days = tb._buy_days(dates, "biweekly")
     per_buy = tb.YEARLY / len(buy_days)
     end = int(dates.searchsorted(tb.END))            # the anniversary
+    wanted, lines = layout()
 
     rows = []
-    for gamma, flip in CONFIGS:
+    for gamma, flip, dip, rebalance in wanted:
         # load_weights reads these from the module; the command line only carries the span here
-        tb.GAMMA, tb.FLIP, tb.CADENCE = float(gamma), flip, "biweekly"
-        tb.ALGO = f"{'Flipped' if flip else ''}algorithm"
+        tb.GAMMA, tb.FLIP, tb.DIP, tb.CADENCE = float(gamma), flip, dip, "biweekly"
         algo = tb.load_weights(dates, buy_days)
-        for rebalance, mode in MODES:
-            for pct in (*THRESHOLDS, None):
-                tb.TAKE = 0.08 if pct is None else pct / 100
-                result = tb._simulate(stocks, algo, buy_days, end, None if pct is None else "close",
-                                      per_buy, True, rebalance=rebalance)
-                rows.append({"row": f"gamma {gamma}, {'flipped' if flip else 'normal'}\n{mode}",
-                             "sell at": "never" if pct is None else f"{pct}%",
-                             "return": 100 * result["pnl"] / tb.YEARLY})
-    tb.TAKE = 0.08
+        for pct in (*THRESHOLDS, None):
+            tb.TAKE = 0.08 if pct is None else pct / 100
+            result = tb._simulate(stocks, algo, buy_days, end, None if pct is None else "close",
+                                  per_buy, True, rebalance=rebalance)
+            rows.append({"row": label(gamma, flip, dip, rebalance),
+                         "sell at": "never" if pct is None else f"{pct}%",
+                         "return": 100 * result["pnl"] / tb.YEARLY})
+    tb.TAKE, tb.DIP = 0.08, None
 
     table = pd.DataFrame(rows)
-    order = [f"gamma {gamma}, {'flipped' if flip else 'normal'}\n{mode}"
-             for gamma, flip in CONFIGS for _, mode in MODES]
     grid = (table.pivot_table(index="row", columns="sell at", values="return")
-            .reindex(index=order, columns=[f"{p}%" for p in THRESHOLDS] + ["never"]))
+            .reindex(index=list(dict.fromkeys(table["row"])), columns=[f"{p}%" for p in THRESHOLDS] + ["never"]))
 
     OUTPUT.mkdir(exist_ok=True)
     stem = "take_profit_sweep" + ("" if tb.SPAN == 1 else f"_span{tb.SPAN}")
     table.to_csv(OUTPUT / f"{stem}.csv", index=False)
 
-    fig, ax = plt.subplots(figsize=(26, 6.4))
+    fig, ax = plt.subplots(figsize=(26, 0.8 * len(wanted)))
     sns.heatmap(grid, ax=ax, annot=True, fmt="+.1f", cmap="RdYlGn", center=0, linewidths=0.4,
                 linecolor="white", annot_kws={"size": 8},
                 cbar_kws={"label": f"profit or loss on the ${tb.YEARLY:,.0f} put in, %"})
-    for boundary in (2, 4, 6):                        # a heavier line between settings
+    for boundary in lines:                            # a heavier line between settings
         ax.axhline(boundary, color="black", linewidth=1.6)
     ax.axvline(len(THRESHOLDS), color="black", linewidth=1.6)   # and before the "never" column
     ax.set_xlabel("Sell a position once its return reaches", fontsize=11)
     ax.set_ylabel("")
     ax.tick_params(axis="y", labelsize=10, rotation=0)
     ax.set_title(f"{tb.SPAN}-year result by sell threshold, {dates[buy_days[0]].date()} to {dates[end].date()}: "
-                 f"K=25, 3-month history, ${tb.YEARLY:,.0f} over every other Monday, sold cash reused, "
+                 f"K=25, ${tb.YEARLY:,.0f} over every other Monday, sold cash reused, "
                  "sells checked at the close", fontsize=11, pad=12)
     fig.tight_layout()
     fig.savefig(OUTPUT / f"{stem}.png", dpi=110)
 
     print(f"saved {OUTPUT / f'{stem}.png'} ({grid.shape[0]} rows x {grid.shape[1]} columns), "
           f"{len(buy_days)} buys, valued {dates[end].date()}")
-    for (row, _), group in table.groupby(["row", "sell at"], sort=False):
-        pass
     for row, group in table.groupby("row", sort=False):
         sweep = (group[group["sell at"] != "never"].set_index("sell at")["return"]
                  .reindex([f"{p}%" for p in THRESHOLDS]))
         never = group[group["sell at"] == "never"]["return"].iloc[0]
-        print(f"  {row.replace(chr(10), ', '):<58}best {sweep.idxmax():>4} at {sweep.max():+.1f}% | "
+        print(f"  {row.replace(chr(10), ', '):<64}best {sweep.idxmax():>4} at {sweep.max():+.1f}% | "
               f"5-15%: {sweep['5%':'15%'].mean():+.1f}% avg | never: {never:+.1f}%")
 
 
