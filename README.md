@@ -109,10 +109,11 @@ How the rule would have done, with heatmaps and a figure of every position
 from the day it was bought, is in the documentation:
 [Take-profit backtests](https://stonker.readthedocs.io/en/latest/take_profit.html).
 
-#### Running it hourly on a server
+#### Running it every 15 minutes on a server
 
-`deploy/systemd/` holds a systemd timer that runs the dry run every hour through
-the US session, from 06:32 Pacific (two minutes after the open) until 12:32. The
+`deploy/systemd/` holds a systemd timer that runs the dry run every 15 minutes
+through the US session, from 06:32 Pacific (two minutes after the open) until
+12:47. The
 broker commands need neither `torch` nor `yfinance`, so a small server can
 install the package without them. The unit ships as a dry run; going live is a
 separate, explicit step.

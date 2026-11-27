@@ -90,8 +90,9 @@ long position; nothing goes short.
 ## Take-profit sells (`stonks/robinhood.py` → `stonks sell`)
 - Rule: sell the **whole position** once its *total* return (price vs Robinhood `average_buy_price`)
   reaches `--take-profit` (default 8%). Not today's move — both percentages are printed for cross-checking
-  against the app. Checked **once per run** (not continuously); the shipped timer runs hourly through the
-  session, so a spike above the threshold between two runs is missed.
+  against the app. Checked **once per run** (not continuously); the shipped timer runs every 15 minutes through
+  the session, so a spike above the threshold between two runs is missed (it was hourly until 2026-11-27,
+  when a position crossed +10% between two hourly checks and had to be sold by hand).
 - `select_sells()` is the pure decision; `load_positions()` does one positions GET + one batched quotes GET
   (the library's `build_holdings()` silently drops positions that error — avoided). A failed read **raises**
   so a scheduled run can't mistake an outage for "nothing to sell".
@@ -103,8 +104,9 @@ long position; nothing goes short.
   idempotent (a sold position is gone; a pending one has `shares_held_for_sells`).
 - Dry run by default; `--execute` confirms; `--execute --yes` is the unattended mode. Submissions persisted to
   `data/last_robinhood_{orders,sells}.json`; `stonks orders` re-checks both.
-- Server: `deploy/systemd/` timer hourly 06:32–12:32 `America/Los_Angeles` (open is 06:30 PT; first run
-  is at :32 because quotes can lag the opening seconds), dry run until `--execute --yes` is added as a
+- Server: `deploy/systemd/` timer every 15 minutes, 06:32–12:47 `America/Los_Angeles` (open is 06:30 PT; first
+  run is at :32 because quotes can lag the opening seconds; two `OnCalendar` lines so nothing fires before the
+  open), dry run until `--execute --yes` is added as a
   drop-in (`deploy/systemd/live/override.conf`). torch is imported lazily (inside `_optimize_long_only`) so
   `sell`/`orders` run without it (`pip install --no-deps` + pandas, robin_stocks, click, tqdm).
   `deploy/README.md` is the step-by-step deployment guide.
@@ -208,7 +210,7 @@ long position; nothing goes short.
   (optimize_portfolio), robinhood.py (login, buy/sell submission, select_sells), cli.py. Exports: get_prices,
   to_returns, optimize_portfolio, load_universe, Settings.
 - `deploy/`: `README.md` (step-by-step deployment guide) and `systemd/` with `stonks-sell.{service,timer}`
-  for the hourly server run (dry run as shipped) and `live/override.conf`, the drop-in that turns it live.
+  for the scheduled server run (dry run as shipped) and `live/override.conf`, the drop-in that turns it live.
 - `notebooks/`: simple_PCA, PCA_on_returns, mean_variance_portfolio, portfolio_short_window
   (thin wrapper over optimize_portfolio; restarts + training-curve plots), portfolio_oos_test,
   portfolio_factor_model, portfolio_short_and_long_stocks, max_ratio_portfolio,

@@ -2,8 +2,8 @@
 
 `stonks sell` checks every open Robinhood position and sells each one whose
 total return has reached a threshold. This is how to run it unattended on a
-Linux server with systemd: an hourly timer through the US session, a dry run
-first, and live selling as a separate, explicit step.
+Linux server with systemd: a timer every 15 minutes through the US session, a
+dry run first, and live selling as a separate, explicit step.
 
 Tested on Debian 12 with Python 3.11. While it runs, the job needs about 85 MB
 of memory and a few seconds, and it does not need `torch`. It makes outbound
@@ -18,7 +18,7 @@ rules are not involved. The unit files assume the code lives in
 ```bash
 git clone https://github.com/luisdiaz1997/stonks.git /root/gitclones/stonks
 cd /root/gitclones/stonks
-git checkout feat/robinhood-sell        # any branch or tag that has `stonks sell`
+git checkout master                     # any branch or tag that has `stonks sell`
 python3 -m venv .venv
 .venv/bin/pip install --no-deps -e .
 .venv/bin/pip install pandas robin_stocks click tqdm
@@ -68,7 +68,7 @@ Compare the table with the Robinhood app before going further. `total_return_pct
 is the app's total return, `day_change_pct` its today's return, and
 `avg_buy_price` its average cost.
 
-## 5. Install the hourly timer (still a dry run)
+## 5. Install the timer (still a dry run)
 
 ```bash
 cd /root/gitclones/stonks
@@ -78,9 +78,9 @@ systemctl enable --now stonks-sell.timer
 systemctl list-timers | grep stonks
 ```
 
-The timer starts the job every hour through the US session: 06:32 to 12:32
-Pacific, seven runs, on every day including weekends. On a closed day the job
-asks Robinhood's calendar and does nothing. The first run is at 06:32 rather
+The timer starts the job every 15 minutes through the US session: 06:32 to
+12:47 Pacific, 26 runs, on every day including weekends. On a closed day the
+job asks Robinhood's calendar and does nothing. The first run is at 06:32 rather
 than 06:30:00 because quotes can still show the previous close in the opening
 seconds. The timer is enabled, so it comes back after a reboot. A run missed
 while the server was off is skipped, not replayed.
@@ -190,6 +190,6 @@ move that command below the interactive check in the file.
 | `/etc/stonks/robinhood.env` | Username and password, readable by root only |
 | `~/.tokens/robinhood.pickle` | The session the job reuses |
 | `/etc/systemd/system/stonks-sell.service` | How one run starts: as root, with the credentials, a 10-minute limit, and `/usr` and `/etc` read-only |
-| `/etc/systemd/system/stonks-sell.timer` | When: hourly, 06:32 to 12:32 Pacific |
+| `/etc/systemd/system/stonks-sell.timer` | When: every 15 minutes, 06:32 to 12:47 Pacific |
 | `/etc/systemd/system/stonks-sell.service.d/override.conf` | Live mode. No file means dry run |
 | `/root/gitclones/stonks/data/last_robinhood_sells.json` | Order IDs of the latest sell submission |

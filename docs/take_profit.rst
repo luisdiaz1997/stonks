@@ -207,9 +207,10 @@ What the backtests leave out
   comparison it does not.
 - **Trading costs.** Fills are at the closing price with no bid-ask spread,
   which matters most for selling everything every buy day.
-- **Hourly checks.** The live job checks hourly. The backtests sell at the
-  close, or at the exact threshold the moment a day's high reaches it; at γ=40
-  the two differ by up to about $1,700 over two years.
+- **Timed checks.** The live job checks every 15 minutes (hourly until
+  2026-11-27). The backtests sell at the close, or at the exact threshold the
+  moment a day's high reaches it; at γ=40 the two differ by up to about
+  $1,700 over two years.
 - **When tax is paid.** The bill on the first year's gains would leave less to
   invest in the second.
 - **Many variants.** Hundreds of combinations were tried. The best cell of that
